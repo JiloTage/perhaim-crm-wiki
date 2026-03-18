@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Per Heim CRM v3.2 統合設計書 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; Per Heim CRM v3.2 統合設計書
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">Per Heim CRM v3.2 統合設計書</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim（不動産AIヒアリングシステム）にCRM v3.2機能を統合するための包括的設計書。既存のAIヒアリング機能を維持しつつ、反響取込・顧客管理・追客・分析を実現するハイブリッド拡張アーキテクチャを定義する。</div>
+
+      <h2 id="executive-summary">エグゼクティブサマリー</h2>
+      <p>現在の <b>Per Heim</b> は「AIヒアリング＋招待URL管理」に特化した単機能システムである。<b>CRM v3.2</b> は「反響取込 → 顧客管理 → AI接続 → 追客 → 分析」をカバーする本格CRMであり、本設計書はこの機能を既存リポジトリ <code>estate_ai_agents</code> にどう統合するかを定義する。</p>
+
+      <p>結論として、<a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a>を採用する。既存のAIヒアリング機能は一切変更せず、CRM機能を新規モジュールとして追加し、Firestoreを共有DBとする方針である。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+graph TB
+    subgraph repo["estate_ai_agents リポジトリ"]
+        AI["AIヒアリング<br/>(既存・維持)<br/>src/agents/<br/>src/server/routers/"]
+        CRM_BE["CRM Backend<br/>(新規追加)<br/>src/server/crm/"]
+        CRM_FE["CRM Frontend<br/>(新規追加)<br/>frontend/src/crm/"]
+    end
+
+    FS["共有: Firestore + 認証基盤"]
+
+    AI --> FS
+    CRM_BE --> FS
+    CRM_FE --> CRM_BE
+    CRM_BE -.->|読み取り専用参照| AI
+      </pre></div>
+
+      <h2 id="before-after">Before / After 比較</h2>
+      <table>
+        <thead>
+          <tr><th>観点</th><th>Before（現在）</th><th>After（CRM統合後）</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>顧客管理</b></td><td>lead（招待単位）のみ</td><td>customerレコード + フェーズ管理 + タイムライン</td></tr>
+          <tr><td><b>営業画面</b></td><td>リード一覧 + 詳細ドロワー</td><td>カンバン + タスクリスト + 顧客カード + タイムライン</td></tr>
+          <tr><td><b>反響取込</b></td><td>手動で招待URL発行</td><td>SUUMO/HOME'Sメール自動パース + 自動顧客生成</td></tr>
+          <tr><td><b>追客</b></td><td>なし</td><td>LINE手動送受信 + メールテンプレート + 通話記録</td></tr>
+          <tr><td><b>分析</b></td><td>KPI3つ（発行/開封/完了）</td><td>デュアルファネル + リードタイム + ROIレポート</td></tr>
+          <tr><td><b>連携</b></td><td>PerHub同期のみ</td><td>LINE + Googleカレンダー + CSV + PerHub</td></tr>
+          <tr><td><b>権限</b></td><td>会社/店舗の2階層</td><td>管理者/マネージャー/担当者の3ロール + 権限マトリクス</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="genjou-bunseki">現状分析</h2>
+      <p>既存システムはFirestore上の単一ドキュメントにすべてのデータを格納する方式で動作している。主要なデータ構造は以下の通り:</p>
+      <ul>
+        <li><code>leads</code>: 招待1回＝1レコードのデータ</li>
+        <li><code>sessions</code>: AIヒアリングセッション</li>
+        <li><code>artifacts</code>: AI出力（profile, queries, sections）</li>
+        <li><code>tenant_accounts</code> / <code>store_registry</code> / <code>tenant_employees</code>: 認証・組織管理</li>
+      </ul>
+      <p>既に実装済みの機能としては、テナント/店舗/従業員管理、招待URL発行、AIヒアリング実行、PerHub同期、セッションCookie認証、監査ログ、リード一覧表示などがある。</p>
+
+      <h2 id="sabun-bunseki">CRM v3.2 との差分分析</h2>
+      <p>CRM v3.2 の機能群に対する既存実装の対応状況は以下の通り:</p>
+
+      <h3 id="shinki-kaihatsu">新規開発が必要な機能</h3>
+      <ul>
+        <li><b>F1 反響管理</b>: ポータル反響自動取込（メールパース）、サンクスメール、重複顧客警告、反響自動割当</li>
+        <li><b>F2 顧客管理</b>: customerレコード（lead → customer昇格）、カンバン、顧客カード、フェーズ/タスク管理</li>
+        <li><b>F4 追客</b>: LINE手動送受信、メール送信、通話記録</li>
+        <li><b>F6 分析</b>: ダッシュボード、デュアルファネル、リードタイム分析、月次レポート</li>
+        <li><b>FX 通知</b>: 横断通知設計（Web Push + メール）</li>
+      </ul>
+
+      <h3 id="kakuchou-kinou">既存拡張で対応する機能</h3>
+      <ul>
+        <li><b>F3 AIヒアリング接続</b>: URL生成は既存、完了通知・ステータス照会を拡張</li>
+        <li><b>F8 権限・セキュリティ</b>: 2階層→3ロールへの拡張、PII暗号化の追加</li>
+        <li><b>FZ マルチテナント</b>: 既存tenant_id分離を強化</li>
+      </ul>
+
+      <h2 id="lead-customer">最大の設計課題: lead → customer 変換</h2>
+      <p>現在の <code>lead</code> は「招待1回＝1レコード」。CRM v3.2 の <code>customer</code> は「顧客1人＝1レコード（複数招待を持ちうる）」。この概念モデルの変換が設計の核心である。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+erDiagram
+    CUSTOMER ||--o{ HEARING_INVITE : "1:N"
+    CUSTOMER ||--o{ COMMUNICATION : "1:N"
+    CUSTOMER ||--o{ CRM_TASK : "1:N"
+    CUSTOMER ||--o{ TIMELINE_EVENT : "1:N"
+    CUSTOMER ||--|| PHASE : "1:1"
+    HEARING_INVITE ||--|| SESSION : "1:1"
+    SESSION ||--o{ ARTIFACT : "1:N"
+
+    CUSTOMER {
+        string customer_id PK
+        string name
+        string phase
+        string assigned_employee_id
+        list lead_ids
+    }
+    HEARING_INVITE {
+        string lead_id PK
+        string customer_id FK
+        string invite_id
+        string status
+    }
+      </pre></div>
+
+      <p>変換戦略として、初回マイグレーションは暫定的に<b>1 lead = 1 customer</b>とし、複数leadの統合はmerge UI導入後に段階的に実施する。詳細は<a href="crm-data-model.html">CRMデータモデル設計</a>を参照。</p>
+
+      <h2 id="sekkei-gaiyo">設計領域の概要</h2>
+      <p>本統合設計は以下の主要領域で構成される:</p>
+      <ul>
+        <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a> — モジュール分離方針、既存コードとの接続ポイント、認証共有設計</li>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a> — Firestoreコレクション設計、顧客・タスク・タイムライン・コミュニケーション・反響の各モデル</li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a> — 顧客管理/タスク管理/追客/反響管理/分析/カンバンの各APIエンドポイント</li>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a> — 画面遷移、ダッシュボード・カンバン・顧客カードの画面仕様、CSS設計</li>
+        <li><a href="crm-jissou-phase.html">CRM実装フェーズ計画</a> — Phase 0〜7の段階的実装計画、リスクと対策、判断が必要な項目</li>
+      </ul>
+
+      <h2 id="housin">基本方針</h2>
+      <ol>
+        <li>既存のAIヒアリング機能は<b>一切変更しない</b>（壊さない）</li>
+        <li>CRM機能は<b>新規モジュール</b>（<code>src/server/crm/</code>, <code>frontend/src/crm/</code>）として追加</li>
+        <li>Firestoreを共有DBとし、既存の <code>invite_sales</code> データをCRM側から<b>読み取り専用</b>で参照</li>
+        <li>認証基盤（テナント/店舗ログイン）は既存を<b>拡張</b>して利用</li>
+        <li>CRM機能では<b>Firestoreネイティブコレクション</b>を使用（単一ドキュメント方式から脱却）</li>
+      </ol>
+
+      <h2 id="kibo-mitoshi">規模見通し</h2>
+      <p>全8フェーズ（Phase 0〜7）で合計<b>約16〜23週（4〜6ヶ月）</b>の実装期間を見込む。最小MVP（Phase 1〜3: 顧客管理 + タスク管理 + AI統合）は約4〜7週で提供可能。詳細は<a href="crm-jissou-phase.html">CRM実装フェーズ計画</a>を参照。</p>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#executive-summary">エグゼクティブサマリー</a></li>
+          <li><a href="#before-after">Before / After 比較</a></li>
+          <li><a href="#genjou-bunseki">現状分析</a></li>
+          <li><a href="#sabun-bunseki">CRM v3.2 との差分分析</a></li>
+          <li class="toc-h3"><a href="#shinki-kaihatsu">新規開発が必要な機能</a></li>
+          <li class="toc-h3"><a href="#kakuchou-kinou">既存拡張で対応する機能</a></li>
+          <li><a href="#lead-customer">最大の設計課題: lead → customer 変換</a></li>
+          <li><a href="#sekkei-gaiyo">設計領域の概要</a></li>
+          <li><a href="#housin">基本方針</a></li>
+          <li><a href="#kibo-mitoshi">規模見通し</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+          <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+          <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+          <li><a href="crm-jissou-phase.html">CRM実装フェーズ計画</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+        <li><a href="crm-jissou-phase.html">CRM実装フェーズ計画</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+        <li><a href="crm-jissou-phase.html">CRM実装フェーズ計画</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

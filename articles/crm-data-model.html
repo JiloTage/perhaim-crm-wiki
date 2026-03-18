@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRMデータモデル設計 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; CRMデータモデル設計
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">CRMデータモデル設計</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2におけるFirestoreコレクション設計と各データモデル（顧客・タスク・タイムライン・コミュニケーション・反響）の詳細仕様。既存lead構造からcustomerモデルへのマイグレーション戦略を含む。</div>
+
+      <p>本記事では、<a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a>で定義されたデータモデル設計の詳細を解説する。CRM機能の中核となる<b>Firestoreコレクション設計</b>、<b>顧客（Customer）モデル</b>、<b>タスク（CrmTask）モデル</b>、<b>タイムライン（TimelineEvent）モデル</b>、<b>コミュニケーション（Communication）モデル</b>、<b>反響（Inquiry）モデル</b>の各スキーマ定義と、既存の<b>leadデータからcustomerへのマイグレーション戦略</b>を包括的に記述する。</p>
+
+      <p>データモデル設計の基本方針は、既存の単一ドキュメント方式（<code>invite_sales_state/default</code>）からの脱却であり、CRM機能ではFirestoreの<b>ネイティブコレクション</b>を採用する。これにより、大量データへのスケーラビリティ、クエリの柔軟性、セキュリティルールの細粒度制御が実現される。</p>
+
+      <!-- ER図 -->
+      <h2 id="er-diagram">全体ER図</h2>
+      <p>CRMデータモデル全体の関係性を以下のER図で示す。<b>Customer</b>を中心に、タスク・タイムライン・コミュニケーション・反響の各エンティティが関連付けられる。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+erDiagram
+    CUSTOMER ||--o{ CRM_TASK : "1:N タスク"
+    CUSTOMER ||--o{ TIMELINE_EVENT : "1:N イベント"
+    CUSTOMER ||--o{ COMMUNICATION : "1:N 連絡記録"
+    CUSTOMER ||--o{ HEARING_INVITE : "1:N 招待"
+    CUSTOMER ||--|| NEEDS_TAGS : "1:1 ニーズ"
+    INQUIRY ||--o| CUSTOMER : "N:1 紐付け"
+    HEARING_INVITE ||--|| SESSION : "1:1"
+    SESSION ||--o{ ARTIFACT : "1:N"
+
+    CUSTOMER {
+        string customer_id PK
+        string tenant_id
+        string store_id
+        string name
+        string phase
+        string assigned_employee_id
+        list lead_ids
+        NeedsTags needs_tags
+        string phone_encrypted
+        string email_search_hash
+    }
+    CRM_TASK {
+        string task_id PK
+        string customer_id FK
+        string assigned_employee_id
+        string title
+        string task_type
+        string priority
+        string status
+        bool auto_generated
+    }
+    TIMELINE_EVENT {
+        string event_id PK
+        string customer_id FK
+        string event_type
+        string summary
+        bool auto_generated
+    }
+    COMMUNICATION {
+        string comm_id PK
+        string customer_id FK
+        string channel
+        string direction
+        string status
+    }
+    INQUIRY {
+        string inquiry_id PK
+        string tenant_id
+        string source
+        string status
+        string customer_id FK
+    }
+    NEEDS_TAGS {
+        list dealbreakers
+        list must_haves
+        list nice_to_haves
+        list dont_care
+    }
+      </pre></div>
+
+      <h2 id="firestore-collection">Firestoreコレクション設計</h2>
+      <p>既存のPer Heimシステムは <code>invite_sales_state/default</code> という<b>単一ドキュメント</b>にすべてのデータを格納する方式で動作している。しかし、CRMのデータ量増加（数千〜数万件の顧客レコード、膨大なタイムラインイベント）に対してこの方式は耐えられない。CRM機能ではFirestoreの<b>ネイティブコレクション</b>を使い、各レコードを独立したドキュメントとして管理する。</p>
+
+      <h3 id="firestore-prerequisite">前提条件</h3>
+      <ul>
+        <li>CRM機能を有効化する環境では <code>INVITE_SALES_STORAGE_BACKEND=firestore</code> を<b>必須化</b>する</li>
+        <li>local/dev は Firestore Emulator を使用。JSON backend は既存 <code>invite_sales</code> のみを対象とする<b>レガシー運用</b>とし、CRMの正式サポート対象外とする</li>
+        <li>既存の <code>invite_sales_state/default</code> と CRM コレクション群が<b>同一 Firestore 上</b>で一貫して参照可能</li>
+      </ul>
+
+      <h3 id="collection-structure">コレクション構造</h3>
+      <p>新規に追加するコレクション群は以下の通りである:</p>
+      <table>
+        <thead>
+          <tr><th>コレクションパス</th><th>区分</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>invite_sales_state/default</code></td><td>既存（変更なし）</td><td>AIヒアリング既存データ</td></tr>
+          <tr><td><code>crm_customers/{customer_id}</code></td><td>新規</td><td>顧客マスタ</td></tr>
+          <tr><td><code>crm_tasks/{task_id}</code></td><td>新規</td><td>タスク管理</td></tr>
+          <tr><td><code>crm_timeline/{event_id}</code></td><td>新規</td><td>タイムラインイベント</td></tr>
+          <tr><td><code>crm_communications/{comm_id}</code></td><td>新規</td><td>コミュニケーション記録</td></tr>
+          <tr><td><code>crm_inquiries/{inquiry_id}</code></td><td>新規</td><td>反響レコード</td></tr>
+          <tr><td><code>crm_analytics/{tenant_id}/monthly/{yyyymm}</code></td><td>新規</td><td>月次集計データ</td></tr>
+          <tr><td><code>crm_settings/{tenant_id}</code></td><td>新規</td><td>テナントCRM設定</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="customer-model">顧客モデル（Customer）</h2>
+      <p><b>Customer</b>モデルはCRMの中核エンティティである。「<b>1人の顧客 = 1レコード</b>」の原則に基づき、従来のlead（招待1回＝1レコード）から概念を転換する。顧客は複数のlead（ヒアリング招待）を持つことができ、<code>lead_ids</code> フィールドで1:Nの関係を管理する。</p>
+
+      <h3 id="customer-fields">フィールド定義</h3>
+      <table>
+        <thead>
+          <tr><th>フィールド</th><th>型</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>customer_id</code></td><td>string</td><td>PK。<code>"cust_" + ULID</code> 形式</td></tr>
+          <tr><td><code>tenant_id</code></td><td>string</td><td>テナント識別子</td></tr>
+          <tr><td><code>store_id</code></td><td>string | null</td><td>店舗識別子</td></tr>
+          <tr><td><code>name</code></td><td>string</td><td>顧客名</td></tr>
+          <tr><td><code>name_kana</code></td><td>string | null</td><td>フリガナ</td></tr>
+          <tr><td><code>phone_encrypted</code></td><td>string | null</td><td>暗号化済み電話番号（表示用）</td></tr>
+          <tr><td><code>email_encrypted</code></td><td>string | null</td><td>暗号化済みメールアドレス（表示用）</td></tr>
+          <tr><td><code>phone_search_hash</code></td><td>string | null</td><td>正規化電話番号の検索用ハッシュ</td></tr>
+          <tr><td><code>email_search_hash</code></td><td>string | null</td><td>正規化メールの検索用ハッシュ</td></tr>
+          <tr><td><code>contact_preference</code></td><td>string</td><td>連絡希望手段: <code>"phone"</code> | <code>"email"</code> | <code>"line"</code> | <code>"any"</code></td></tr>
+          <tr><td><code>preferred_time</code></td><td>string | null</td><td>連絡希望時間帯</td></tr>
+          <tr><td><code>memo</code></td><td>string | null</td><td>自由メモ</td></tr>
+          <tr><td><code>phase</code></td><td>CustomerPhase</td><td>現在のフェーズ（後述）</td></tr>
+          <tr><td><code>phase_changed_at</code></td><td>string | null</td><td>最終フェーズ変更日時</td></tr>
+          <tr><td><code>assigned_employee_id</code></td><td>string | null</td><td>担当者の従業員ID</td></tr>
+          <tr><td><code>source</code></td><td>string</td><td>流入元: <code>"suumo"</code> | <code>"homes"</code> | <code>"manual"</code> | <code>"csv"</code> | <code>"line"</code></td></tr>
+          <tr><td><code>lead_ids</code></td><td>list[string]</td><td>紐づくlead_id（1:N）</td></tr>
+          <tr><td><code>active_lead_id</code></td><td>string | null</td><td>現在アクティブな招待のlead_id</td></tr>
+          <tr><td><code>hearing_profile</code></td><td>dict | null</td><td>AI構造化プロファイル（artifactsから転記）</td></tr>
+          <tr><td><code>needs_tags</code></td><td>NeedsTags | null</td><td>ニーズ構造タグ（後述）</td></tr>
+          <tr><td><code>lost_reason</code></td><td>string | null</td><td>失注理由</td></tr>
+          <tr><td><code>tags</code></td><td>list[string]</td><td>ユーザー定義タグ</td></tr>
+          <tr><td><code>merged_from</code></td><td>list[string]</td><td>マージ元customer_id</td></tr>
+          <tr><td><code>created_at</code> / <code>updated_at</code></td><td>string</td><td>作成・更新日時</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="phase-management">フェーズ管理（CustomerPhase）</h3>
+      <p>顧客の営業進捗を10段階の<b>フェーズ</b>で管理する。フェーズはカンバンビューの列に対応し、営業プロセス全体を可視化する。詳細は<a href="crm-phase-kanri.html">フェーズ管理詳細</a>を参照。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+stateDiagram-v2
+    [*] --> inquiry: 反響受信
+    inquiry --> hearing_pending: ヒアリング依頼
+    hearing_pending --> hearing_active: URL開封
+    hearing_active --> hearing_done: ヒアリング完了
+    hearing_done --> visit_reserved: 来店予約
+    visit_reserved --> visited: 来店完了
+    visited --> viewing: 内見設定
+    viewing --> application: 申込
+    application --> contracted: 成約
+    inquiry --> lost: 失注
+    hearing_pending --> lost: 失注
+    hearing_active --> lost: 失注
+    hearing_done --> lost: 失注
+    visit_reserved --> lost: 失注
+    visited --> lost: 失注
+    viewing --> lost: 失注
+    application --> lost: 失注
+    contracted --> [*]
+    lost --> [*]
+      </pre></div>
+
+      <table>
+        <thead>
+          <tr><th>フェーズ値</th><th>日本語名</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>inquiry</code></td><td>反響</td><td>反響受信直後の初期状態</td></tr>
+          <tr><td><code>hearing_pending</code></td><td>ヒアリング待ち</td><td>AIヒアリングURL発行済み・未開封</td></tr>
+          <tr><td><code>hearing_active</code></td><td>ヒアリング中</td><td>AIヒアリング実行中</td></tr>
+          <tr><td><code>hearing_done</code></td><td>ヒアリング済み</td><td>AIヒアリング完了</td></tr>
+          <tr><td><code>visit_reserved</code></td><td>来店予約</td><td>来店予約確定</td></tr>
+          <tr><td><code>visited</code></td><td>来店済み</td><td>来店完了</td></tr>
+          <tr><td><code>viewing</code></td><td>内見</td><td>物件内見段階</td></tr>
+          <tr><td><code>application</code></td><td>申込</td><td>申込手続き中</td></tr>
+          <tr><td><code>contracted</code></td><td>成約</td><td>契約完了</td></tr>
+          <tr><td><code>lost</code></td><td>失注</td><td>失注（理由と詳細を記録）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="needs-tags">ニーズ構造タグ（NeedsTags）</h3>
+      <p><b>NeedsTags</b>はPer Heim CRMの<b>差別化コア機能</b>である。AIヒアリングから抽出された顧客ニーズを4階層の優先度で構造化し、物件マッチングや追客戦略の最適化に活用する。</p>
+      <table>
+        <thead>
+          <tr><th>フィールド</th><th>型</th><th>説明</th><th>例</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>dealbreakers</code></td><td>list[string]</td><td>絶対NG条件</td><td><code>["1階不可", "線路沿い不可"]</code></td></tr>
+          <tr><td><code>must_haves</code></td><td>list[string]</td><td>必須条件</td><td><code>["2LDK以上", "駅徒歩10分以内"]</code></td></tr>
+          <tr><td><code>nice_to_haves</code></td><td>list[string]</td><td>あったら嬉しい条件</td><td><code>["宅配ボックス", "オートロック"]</code></td></tr>
+          <tr><td><code>dont_care</code></td><td>list[string]</td><td>気にしない条件</td><td><code>["築年数", "向き"]</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="pii-encryption">PII暗号化設計</h3>
+      <p>個人情報保護のため、顧客の連絡先情報には<b>暗号化＋検索用ハッシュ</b>の二重構造を採用する。詳細な暗号化方式とキー管理については<a href="crm-pii-angou.html">PII暗号化設計</a>を参照。</p>
+      <ul>
+        <li><b>保存ルール</b>: API入力は平文の <code>phone</code> / <code>email</code> を受け取ってよい</li>
+        <li><b>暗号化処理</b>: リポジトリ保存時に <code>phone_encrypted</code> / <code>email_encrypted</code> と <code>phone_search_hash</code> / <code>email_search_hash</code> を同時生成</li>
+        <li><b>検索</b>: 一覧検索・重複検知はハッシュ列を使用</li>
+        <li><b>表示</b>: 画面表示時のみ復号する</li>
+      </ul>
+
+      <h2 id="task-model">タスクモデル（CrmTask）</h2>
+      <p><b>CrmTask</b>は担当者のToDoアイテムを管理するモデルである。手動作成に加え、フェーズ遷移や反響受信をトリガーとした<b>自動生成</b>にも対応する。</p>
+
+      <h3 id="task-fields">フィールド定義</h3>
+      <table>
+        <thead>
+          <tr><th>フィールド</th><th>型</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>task_id</code></td><td>string</td><td>PK。<code>"task_" + ULID</code> 形式</td></tr>
+          <tr><td><code>tenant_id</code></td><td>string</td><td>テナント識別子</td></tr>
+          <tr><td><code>customer_id</code></td><td>string</td><td>関連顧客のID</td></tr>
+          <tr><td><code>assigned_employee_id</code></td><td>string</td><td>担当者</td></tr>
+          <tr><td><code>title</code></td><td>string</td><td>タスク名</td></tr>
+          <tr><td><code>description</code></td><td>string | null</td><td>タスク詳細</td></tr>
+          <tr><td><code>task_type</code></td><td>string</td><td><code>"follow_up"</code> | <code>"call"</code> | <code>"visit"</code> | <code>"document"</code> | <code>"manual"</code></td></tr>
+          <tr><td><code>priority</code></td><td>string</td><td><code>"urgent"</code> | <code>"high"</code> | <code>"normal"</code> | <code>"low"</code></td></tr>
+          <tr><td><code>due_date</code></td><td>string | null</td><td>期日（YYYY-MM-DD）</td></tr>
+          <tr><td><code>due_time</code></td><td>string | null</td><td>期限時刻（HH:MM）</td></tr>
+          <tr><td><code>status</code></td><td>string</td><td><code>"pending"</code> | <code>"in_progress"</code> | <code>"completed"</code> | <code>"cancelled"</code></td></tr>
+          <tr><td><code>auto_generated</code></td><td>bool</td><td>システム自動生成フラグ</td></tr>
+          <tr><td><code>trigger_event</code></td><td>string | null</td><td>自動生成のトリガーイベント</td></tr>
+          <tr><td><code>created_at</code> / <code>updated_at</code></td><td>string</td><td>作成・更新日時</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="task-auto-generation">自動生成ルール</h3>
+      <p><code>auto_generated: true</code> のタスクは、以下のようなイベントをトリガーとしてシステムが自動作成する:</p>
+      <ul>
+        <li><b>反響受信時</b>: 「初回連絡」タスクを自動作成（priority: high）</li>
+        <li><b>ヒアリング完了時</b>: 「ヒアリング結果確認・来店提案」タスクを自動作成</li>
+        <li><b>フェーズ遷移時</b>: 遷移先フェーズに応じた次アクションタスクを自動作成</li>
+        <li><b>期限超過時</b>: リマインダータスクを再生成</li>
+      </ul>
+
+      <h2 id="timeline-model">タイムラインモデル（TimelineEvent）</h2>
+      <p><b>TimelineEvent</b>は顧客に紐づく<b>全接点の時系列記録</b>を担う。営業活動の透明性と追跡可能性を確保するために、あらゆる顧客接点がイベントとして記録される。</p>
+
+      <h3 id="timeline-fields">フィールド定義</h3>
+      <table>
+        <thead>
+          <tr><th>フィールド</th><th>型</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>event_id</code></td><td>string</td><td>PK。<code>"evt_" + ULID</code> 形式</td></tr>
+          <tr><td><code>tenant_id</code></td><td>string</td><td>テナント識別子</td></tr>
+          <tr><td><code>customer_id</code></td><td>string</td><td>関連顧客のID</td></tr>
+          <tr><td><code>event_type</code></td><td>string</td><td>イベントタイプ（後述）</td></tr>
+          <tr><td><code>summary</code></td><td>string</td><td>表示用サマリ</td></tr>
+          <tr><td><code>detail</code></td><td>dict | null</td><td>イベント固有データ</td></tr>
+          <tr><td><code>actor_employee_id</code></td><td>string | null</td><td>操作者の従業員ID</td></tr>
+          <tr><td><code>auto_generated</code></td><td>bool</td><td>システム自動生成フラグ</td></tr>
+          <tr><td><code>created_at</code></td><td>string</td><td>イベント発生日時</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="event-types">イベントタイプ一覧</h3>
+      <table>
+        <thead>
+          <tr><th>event_type</th><th>日本語名</th><th>説明</th><th>自動/手動</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>inquiry_received</code></td><td>反響受信</td><td>ポータルサイトからの反響を受信</td><td>自動</td></tr>
+          <tr><td><code>hearing_url_sent</code></td><td>ヒアリングURL送付</td><td>AIヒアリングURLを顧客に送信</td><td>手動</td></tr>
+          <tr><td><code>hearing_started</code></td><td>ヒアリング開始</td><td>顧客がヒアリングを開始</td><td>自動</td></tr>
+          <tr><td><code>hearing_completed</code></td><td>ヒアリング完了</td><td>AIヒアリングセッション完了</td><td>自動</td></tr>
+          <tr><td><code>phase_changed</code></td><td>フェーズ遷移</td><td>顧客フェーズの変更</td><td>自動</td></tr>
+          <tr><td><code>task_created</code></td><td>タスク作成</td><td>新規タスクの作成</td><td>両方</td></tr>
+          <tr><td><code>task_completed</code></td><td>タスク完了</td><td>タスクの完了</td><td>手動</td></tr>
+          <tr><td><code>line_sent</code></td><td>LINE送信</td><td>LINE メッセージ送信</td><td>手動</td></tr>
+          <tr><td><code>line_received</code></td><td>LINE受信</td><td>LINE メッセージ受信</td><td>自動</td></tr>
+          <tr><td><code>email_sent</code></td><td>メール送信</td><td>メール送信</td><td>手動</td></tr>
+          <tr><td><code>call_logged</code></td><td>通話記録</td><td>電話の発信・着信記録</td><td>手動</td></tr>
+          <tr><td><code>note_added</code></td><td>メモ追加</td><td>顧客へのメモ追加</td><td>手動</td></tr>
+          <tr><td><code>visit_reserved</code></td><td>来店予約</td><td>来店予約の登録</td><td>手動</td></tr>
+          <tr><td><code>assigned</code></td><td>担当変更</td><td>担当者の変更・割当</td><td>両方</td></tr>
+          <tr><td><code>merged</code></td><td>顧客マージ</td><td>複数顧客レコードの統合</td><td>手動</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="communication-model">コミュニケーションモデル（Communication）</h2>
+      <p><b>Communication</b>モデルは、LINE・メール・電話の3チャネルにわたる顧客とのコミュニケーション記録を統一的に管理する。</p>
+
+      <h3 id="comm-fields">フィールド定義</h3>
+      <table>
+        <thead>
+          <tr><th>フィールド</th><th>型</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>comm_id</code></td><td>string</td><td>PK。<code>"comm_" + ULID</code> 形式</td></tr>
+          <tr><td><code>tenant_id</code></td><td>string</td><td>テナント識別子</td></tr>
+          <tr><td><code>customer_id</code></td><td>string</td><td>関連顧客のID</td></tr>
+          <tr><td><code>channel</code></td><td>string</td><td><code>"line"</code> | <code>"email"</code> | <code>"phone"</code></td></tr>
+          <tr><td><code>direction</code></td><td>string</td><td><code>"outbound"</code>（発信）| <code>"inbound"</code>（着信）</td></tr>
+          <tr><td><code>subject</code></td><td>string | null</td><td>メール件名</td></tr>
+          <tr><td><code>body</code></td><td>string | null</td><td>本文</td></tr>
+          <tr><td><code>template_id</code></td><td>string | null</td><td>使用したテンプレートID</td></tr>
+          <tr><td><code>call_duration_seconds</code></td><td>int | null</td><td>通話時間（秒）</td></tr>
+          <tr><td><code>call_result</code></td><td>string | null</td><td><code>"connected"</code> | <code>"no_answer"</code> | <code>"busy"</code> | <code>"voicemail"</code></td></tr>
+          <tr><td><code>call_memo</code></td><td>string | null</td><td>通話メモ</td></tr>
+          <tr><td><code>line_message_id</code></td><td>string | null</td><td>LINE メッセージID</td></tr>
+          <tr><td><code>line_blocked</code></td><td>bool</td><td>LINEブロック状態</td></tr>
+          <tr><td><code>status</code></td><td>string</td><td><code>"draft"</code> | <code>"sent"</code> | <code>"delivered"</code> | <code>"read"</code> | <code>"failed"</code></td></tr>
+          <tr><td><code>operator_employee_id</code></td><td>string</td><td>操作者の従業員ID</td></tr>
+          <tr><td><code>created_at</code></td><td>string</td><td>作成日時</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="channel-specifics">チャネル別の特性</h3>
+      <ul>
+        <li><b>LINE</b>: <code>line_message_id</code> でメッセージを追跡。<code>line_blocked</code> フラグでブロック状態を管理。Webhook経由で <code>inbound</code> メッセージを自動記録。</li>
+        <li><b>メール</b>: <code>subject</code> / <code>body</code> で全文を保持。<code>template_id</code> でテンプレート送信に対応。</li>
+        <li><b>電話</b>: <code>call_duration_seconds</code>, <code>call_result</code>, <code>call_memo</code> で通話内容を記録。手動入力が基本。</li>
+      </ul>
+
+      <h2 id="inquiry-model">反響モデル（Inquiry）</h2>
+      <p><b>Inquiry</b>モデルは、SUUMO・HOME'S等のポータルサイトから受信した反響メールをパースした結果を格納する。パース前の原文も暗号化して保存し、再パースやトラブルシューティングに備える。</p>
+
+      <h3 id="inquiry-fields">フィールド定義</h3>
+      <table>
+        <thead>
+          <tr><th>フィールド</th><th>型</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>inquiry_id</code></td><td>string</td><td>PK。<code>"inq_" + ULID</code> 形式</td></tr>
+          <tr><td><code>tenant_id</code></td><td>string</td><td>テナント識別子</td></tr>
+          <tr><td><code>source</code></td><td>string</td><td><code>"suumo"</code> | <code>"homes"</code> | <code>"athome"</code> | <code>"manual"</code></td></tr>
+          <tr><td><code>raw_email_body_encrypted</code></td><td>string | null</td><td>パース前原文の暗号化保存</td></tr>
+          <tr><td><code>parsed_at</code></td><td>string | null</td><td>パース実行日時</td></tr>
+          <tr><td><code>customer_name</code></td><td>string | null</td><td>パースした顧客名</td></tr>
+          <tr><td><code>phone_encrypted</code></td><td>string | null</td><td>暗号化済み電話番号</td></tr>
+          <tr><td><code>email_encrypted</code></td><td>string | null</td><td>暗号化済みメールアドレス</td></tr>
+          <tr><td><code>phone_search_hash</code> / <code>email_search_hash</code></td><td>string | null</td><td>検索用ハッシュ</td></tr>
+          <tr><td><code>property_name</code></td><td>string | null</td><td>問い合わせ物件名</td></tr>
+          <tr><td><code>property_url</code></td><td>string | null</td><td>物件URL</td></tr>
+          <tr><td><code>inquiry_message</code></td><td>string | null</td><td>問い合わせメッセージ</td></tr>
+          <tr><td><code>status</code></td><td>string</td><td><code>"new"</code> | <code>"auto_created"</code> | <code>"manual_review"</code> | <code>"duplicate"</code> | <code>"ignored"</code></td></tr>
+          <tr><td><code>customer_id</code></td><td>string | null</td><td>紐づけた顧客ID</td></tr>
+          <tr><td><code>duplicate_candidate_ids</code></td><td>list[string]</td><td>重複候補の顧客ID</td></tr>
+          <tr><td><code>auto_assigned_employee_id</code></td><td>string | null</td><td>自動割当された担当者</td></tr>
+          <tr><td><code>created_at</code></td><td>string</td><td>反響受信日時</td></tr>
+          <tr><td><code>processed_at</code></td><td>string | null</td><td>処理完了日時</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="inquiry-processing">反響処理フロー</h3>
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TD
+    A[反響メール受信] --> B[メールパーサー]
+    B --> C{パース成功?}
+    C -->|Yes| D[検索ハッシュ生成]
+    C -->|No| E[manual_review に設定]
+    D --> F{重複チェック}
+    F -->|重複なし| G[新規顧客自動作成]
+    F -->|重複あり| H{自動判定可能?}
+    H -->|Yes| I[既存顧客に紐付け]
+    H -->|No| J[duplicate 候補を記録]
+    G --> K[担当者自動割当]
+    I --> K
+    J --> E
+    K --> L[タイムラインイベント記録]
+    L --> M[初回連絡タスク自動生成]
+      </pre></div>
+
+      <h2 id="lead-customer-migration">lead → customer マイグレーション</h2>
+      <p>既存の <code>lead</code> データを新しい <code>Customer</code> モデルに変換するマイグレーションは、CRM導入の最も重要な初期作業である。</p>
+
+      <h3 id="migration-premise">前提と制約</h3>
+      <ul>
+        <li>現行leadには <code>phone</code> / <code>email</code> フィールドが存在しないため、初回マイグレーション時点では厳密な「同一人物統合」は<b>不可能</b></li>
+        <li>初回移行は暫定的に <b>1 lead = 1 customer</b> とする</li>
+        <li>複数leadを1 customerにまとめる統合は、Phase 1 の merge UI と Phase 5 の重複検知導入後に段階的に実施</li>
+      </ul>
+
+      <h3 id="phase-mapping">フェーズマッピング</h3>
+      <p>既存leadの <code>status</code> を新しい <code>CustomerPhase</code> に以下のルールでマッピングする:</p>
+      <table>
+        <thead>
+          <tr><th>lead.status</th><th>customer.phase</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>new</code></td><td><code>hearing_pending</code></td><td>新規作成 → ヒアリング待ち</td></tr>
+          <tr><td><code>opened</code></td><td><code>hearing_active</code></td><td>URL開封済み → ヒアリング中</td></tr>
+          <tr><td><code>in_progress</code></td><td><code>hearing_active</code></td><td>進行中 → ヒアリング中</td></tr>
+          <tr><td><code>completed</code></td><td><code>hearing_done</code></td><td>完了 → ヒアリング済み</td></tr>
+          <tr><td><code>revoked</code></td><td><code>lost</code></td><td>取消 → 失注</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="needs-extraction">ニーズタグ抽出</h3>
+      <p>マイグレーション時、既存の <code>artifact_record.content</code>（AIヒアリング結果）からニーズ構造を抽出し、<code>NeedsTags</code> として構造化する。プロファイルの <code>facts</code> セクションから条件を分類し、dealbreakers / must_haves / nice_to_haves / dont_care の4カテゴリに振り分ける。</p>
+
+      <h3 id="migration-id-strategy">ID変換戦略</h3>
+      <p>顧客IDは既存のlead_idから導出する: <code>customer_id = "cust_" + lead_id.replace("lead_", "")</code>。これにより、マイグレーション後も既存データとの追跡可能性を維持できる。<code>lead_ids</code> 配列に元のlead_idを格納し、1:N関係の基盤を構築する。</p>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#er-diagram">全体ER図</a></li>
+          <li><a href="#firestore-collection">Firestoreコレクション設計</a></li>
+          <li class="toc-h3"><a href="#firestore-prerequisite">前提条件</a></li>
+          <li class="toc-h3"><a href="#collection-structure">コレクション構造</a></li>
+          <li><a href="#customer-model">顧客モデル（Customer）</a></li>
+          <li class="toc-h3"><a href="#customer-fields">フィールド定義</a></li>
+          <li class="toc-h3"><a href="#phase-management">フェーズ管理（CustomerPhase）</a></li>
+          <li class="toc-h3"><a href="#needs-tags">ニーズ構造タグ（NeedsTags）</a></li>
+          <li class="toc-h3"><a href="#pii-encryption">PII暗号化設計</a></li>
+          <li><a href="#task-model">タスクモデル（CrmTask）</a></li>
+          <li class="toc-h3"><a href="#task-fields">フィールド定義</a></li>
+          <li class="toc-h3"><a href="#task-auto-generation">自動生成ルール</a></li>
+          <li><a href="#timeline-model">タイムラインモデル（TimelineEvent）</a></li>
+          <li class="toc-h3"><a href="#timeline-fields">フィールド定義</a></li>
+          <li class="toc-h3"><a href="#event-types">イベントタイプ一覧</a></li>
+          <li><a href="#communication-model">コミュニケーションモデル（Communication）</a></li>
+          <li class="toc-h3"><a href="#comm-fields">フィールド定義</a></li>
+          <li class="toc-h3"><a href="#channel-specifics">チャネル別の特性</a></li>
+          <li><a href="#inquiry-model">反響モデル（Inquiry）</a></li>
+          <li class="toc-h3"><a href="#inquiry-fields">フィールド定義</a></li>
+          <li class="toc-h3"><a href="#inquiry-processing">反響処理フロー</a></li>
+          <li><a href="#lead-customer-migration">lead → customer マイグレーション</a></li>
+          <li class="toc-h3"><a href="#migration-premise">前提と制約</a></li>
+          <li class="toc-h3"><a href="#phase-mapping">フェーズマッピング</a></li>
+          <li class="toc-h3"><a href="#needs-extraction">ニーズタグ抽出</a></li>
+          <li class="toc-h3"><a href="#migration-id-strategy">ID変換戦略</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+          <li><a href="crm-phase-kanri.html">フェーズ管理詳細</a></li>
+          <li><a href="crm-pii-angou.html">PII暗号化設計</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        <li><a href="crm-phase-kanri.html">フェーズ管理詳細</a></li>
+        <li><a href="crm-pii-angou.html">PII暗号化設計</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

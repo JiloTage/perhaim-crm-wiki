@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRM実装フェーズ計画 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; CRM実装フェーズ計画
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">CRM実装フェーズ計画</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2の段階的実装計画を定義する。Phase 0（基盤準備）からPhase 7（連携・通知・権限）までの全8段階の開発ロードマップに加え、通知設計、分析・レポート設計、非機能要件、リスクと対策、および判断が必要な項目を包括的にカバーする。</div>
+
+      <!-- ============================================ -->
+      <!-- 通知設計 -->
+      <!-- ============================================ -->
+      <h2 id="tsuchi-sekkei">通知設計</h2>
+      <p>CRM運用において、<b>適切なタイミングでの通知</b>は営業の反応速度と顧客満足度に直結する。本設計では<b>3段階の通知チャネル</b>と<b>NotificationService</b>を中核としたアーキテクチャを定義する。</p>
+
+      <h3 id="tsuchi-channel">通知チャネル</h3>
+      <table>
+        <thead>
+          <tr><th>レベル</th><th>チャネル</th><th>実装方式</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>即時</b></td>
+            <td>ブラウザ通知（Web Push）+ CRM画面内バッジ</td>
+            <td>Service Worker + Firestore <code>onSnapshot</code></td>
+          </tr>
+          <tr>
+            <td><b>日次</b></td>
+            <td>メール</td>
+            <td>Cloud Scheduler + SendGrid / Gmail API</td>
+          </tr>
+          <tr>
+            <td><b>エスカレーション</b></td>
+            <td>メール + CRM画面</td>
+            <td>Cloud Scheduler + 条件判定ロジック</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="tsuchi-events">通知イベント一覧</h3>
+      <p>通知イベントは大きく<b>即時通知</b>、<b>日次バッチ</b>、<b>エスカレーション</b>の3種に分類される。</p>
+
+      <h4>即時通知</h4>
+      <ul>
+        <li><b>inquiry_received</b> — 新規反響受信時、担当者またはラウンドロビンで割当先に「新規反響: {customer_name} ({source})」を push + badge で通知</li>
+        <li><b>hearing_completed</b> — AIヒアリング完了時、担当者に「{customer_name}のAIヒアリングが完了しました」を push + badge で通知</li>
+        <li><b>line_received</b> — LINEメッセージ受信時、担当者に「{customer_name}からLINEメッセージ」を push + badge で通知</li>
+      </ul>
+
+      <h4>日次バッチ</h4>
+      <ul>
+        <li><b>daily_task_summary</b> — 毎日09:00 JST に全従業員へ「本日のタスク: {pending_count}件」をメール送信</li>
+        <li><b>overdue_reminder</b> — 毎日17:00 JST に担当者へ「未完了タスク: {overdue_count}件」をメール + badge で通知</li>
+      </ul>
+
+      <h4>エスカレーション</h4>
+      <ul>
+        <li><b>inquiry_unresponded_30min</b> — 反響未対応30分超過でマネージャーにメール + push で通知</li>
+        <li><b>task_overdue_1day</b> — タスク期限1日超過でマネージャーにメールで通知</li>
+      </ul>
+
+      <h3 id="tsuchi-architecture">通知実装アーキテクチャ</h3>
+      <p>通知の送信は<b>NotificationService</b>が一元管理する。即時通知は<b>Web Push API</b>とFirestore書き込みで処理し、非同期メール送信は<b>Cloud Tasks</b>にエンキューする。定期バッチは<b>Cloud Scheduler</b>がトリガーする。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+graph LR
+    subgraph CloudRun["FastAPI (Cloud Run)"]
+        EV["イベント発生"]
+        NS["NotificationService"]
+    end
+
+    EV --> NS
+    NS -->|Web Push API| BP["ブラウザ通知"]
+    NS -->|Firestore write| BD["バッジ更新"]
+    NS -->|enqueue| CT["Cloud Tasks"]
+    CT -->|SendGrid API| EM["メール送信"]
+
+    subgraph Scheduler["Cloud Scheduler"]
+        S1["09:00 daily_summary"]
+        S2["17:00 overdue_check"]
+        S3["毎月1日 monthly_report"]
+    end
+
+    Scheduler -->|HTTP trigger| NS
+      </pre></div>
+
+      <p>詳細な通知パターンとテンプレート設計については <a href="crm-tsuchi-sekkei.html">通知設計詳細</a> を参照。</p>
+
+      <!-- ============================================ -->
+      <!-- 分析・レポート設計 -->
+      <!-- ============================================ -->
+      <h2 id="bunseki-report">分析・レポート設計</h2>
+      <p>CRM v3.2の分析機能は、<b>デュアルファネル</b>による全体/Per Heim経由の比較と、<b>ROI訴求指標</b>による効果測定を柱とする。経営者への訴求力を高めるため、「Per Heimを使うと来店率がX%上がる」ことをデータで証明できる設計とする。</p>
+
+      <h3 id="dual-funnel">デュアルファネル</h3>
+      <p><b>全体ファネル</b>と<b>Per Heim経由ファネル</b>の2系統を並列表示し、Per Heimの効果を可視化する。</p>
+      <table>
+        <thead>
+          <tr><th>ステージ</th><th>全体ファネル</th><th>Per Heim経由ファネル</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>反響 / ヒアリング依頼</td><td>45件</td><td>20件</td></tr>
+          <tr><td>ヒアリング中 / 完了</td><td>20件</td><td>15件</td></tr>
+          <tr><td>来店予約</td><td>8件（来店率 17.8%）</td><td>7件（<b>来店率 35.0%</b>）</td></tr>
+          <tr><td>成約</td><td>3件</td><td>3件</td></tr>
+        </tbody>
+      </table>
+      <p>Per Heim経由の来店率は全体の約<b>2倍</b>となり、AIヒアリングの効果を定量的に示すことができる。</p>
+
+      <h3 id="roi-metrics">ROI訴求指標（RoiMetrics）</h3>
+      <p><code>RoiMetrics</code>モデルで以下の比較指標を管理する:</p>
+      <ul>
+        <li><b>Per Heim経由</b>: 反響数、来店率、成約率、平均リードタイム</li>
+        <li><b>非Per Heim</b>: 同上の指標</li>
+        <li><b>差分</b>: 来店率改善（<code>visit_rate_improvement</code>）、成約率改善（<code>contract_rate_improvement</code>）、リードタイム短縮日数（<code>lead_time_reduction_days</code>）</li>
+      </ul>
+
+      <h3 id="shukei-houshiki">集計方式</h3>
+      <ul>
+        <li><b>MVP段階</b>: Firestoreクエリでリアルタイム集計（データ量が少ないため許容）</li>
+        <li><b>将来拡張</b>: <code>crm_analytics/{tenant_id}/monthly/{yyyymm}</code> に日次バッチで集計済みデータを保存</li>
+      </ul>
+
+      <p>分析機能の画面設計とグラフ仕様の詳細は <a href="crm-bunseki-report.html">分析レポート詳細</a> を参照。</p>
+
+      <!-- ============================================ -->
+      <!-- 非機能要件 -->
+      <!-- ============================================ -->
+      <h2 id="hi-kinou-youken">非機能要件</h2>
+      <p>CRM統合にあたり、<b>パフォーマンス</b>、<b>セキュリティ</b>、<b>データ保持</b>の3領域で明確な基準を定める。既存の<a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a>の制約を踏まえた設計となっている。</p>
+
+      <h3 id="performance">パフォーマンス基準</h3>
+      <table>
+        <thead>
+          <tr><th>指標</th><th>基準値</th><th>実現手段</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>画面表示</td><td><b>2秒以内</b></td><td>Firestoreインデックス + フロントキャッシュ</td></tr>
+          <tr><td>API応答</td><td><b>200ms以内</b></td><td>Firestoreクエリ最適化</td></tr>
+          <tr><td>同時ユーザー</td><td><b>100ユーザー</b></td><td>Cloud Runオートスケール</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="firestore-index">Firestoreインデックス設計</h3>
+      <p>CRM機能で必要な複合インデックスは <code>firestore.indexes.json</code> に以下を追加する:</p>
+      <ul>
+        <li><code>crm_customers</code>: <code>tenant_id</code> + <code>phase</code> + <code>updated_at</code> (DESC) — カンバン表示用</li>
+        <li><code>crm_customers</code>: <code>tenant_id</code> + <code>store_id</code> + <code>phase</code> — 店舗別フィルタ用</li>
+        <li><code>crm_tasks</code>: <code>tenant_id</code> + <code>assigned_employee_id</code> + <code>due_date</code> + <code>status</code> — タスクリスト用</li>
+        <li><code>crm_timeline</code>: <code>tenant_id</code> + <code>customer_id</code> + <code>created_at</code> (DESC) — タイムライン表示用</li>
+      </ul>
+      <p>インデックス設計の詳細は <a href="crm-data-model.html">CRMデータモデル設計</a> を参照。</p>
+
+      <h3 id="security">セキュリティ</h3>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>対応</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>PII暗号化</b></td><td>電話番号・メールは <code>*_encrypted</code> に AES-256-GCM で保存</td></tr>
+          <tr><td><b>重複検知</b></td><td>正規化済み <code>phone_search_hash</code> / <code>email_search_hash</code> で一致判定</td></tr>
+          <tr><td><b>TLS</b></td><td>Cloud Run で自動（TLS 1.2+）</td></tr>
+          <tr><td><b>監査ログ</b></td><td>全CRM操作を <code>audit_logs</code> に記録</td></tr>
+          <tr><td><b>テナント分離</b></td><td>全クエリに <code>tenant_id</code> フィルタ必須</td></tr>
+          <tr><td><b>CSRF</b></td><td>Cookie SameSite=Lax + Origin検証</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="data-retention">データ保持期間</h3>
+      <table>
+        <thead>
+          <tr><th>データ</th><th>保持期間</th><th>根拠</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>顧客データ（成約）</td><td><b>10年</b></td><td>宅建業法</td></tr>
+          <tr><td>顧客データ（失注）</td><td><b>3年</b></td><td>CRM v3.2 仕様</td></tr>
+          <tr><td>監査ログ</td><td><b>5年</b></td><td>CRM v3.2 仕様</td></tr>
+          <tr><td>コミュニケーション</td><td><b>5年</b></td><td>宅建業法</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- 実装フェーズ計画 -->
+      <!-- ============================================ -->
+      <h2 id="jissou-phase">実装フェーズ計画</h2>
+      <p>全<b>8フェーズ</b>（Phase 0〜7）で合計<b>約16〜23週（4〜6ヶ月）</b>の実装期間を見込む。<b>最小MVP</b>（Phase 1〜3: 顧客管理 + タスク管理 + AI統合）は約<b>4〜7週</b>で提供可能である。各フェーズは前段の成果物に依存する段階的な構成となっている。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+gantt
+    title CRM実装フェーズ ガントチャート
+    dateFormat  YYYY-MM-DD
+    axisFormat  %m/%d
+
+    section 基盤
+    Phase 0 基盤準備           :p0, 2026-04-01, 5d
+
+    section MVP
+    Phase 1 顧客管理コア       :p1, after p0, 15d
+    Phase 2 タスク管理          :p2, after p1, 10d
+    Phase 3 AIヒアリング統合    :p3, after p1, 10d
+
+    section 追客・反響
+    Phase 4 追客・コミュニケーション :p4, after p1, 25d
+    Phase 5 反響管理            :p5, after p4, 25d
+
+    section 分析・運用
+    Phase 6 分析・レポート      :p6, after p3, 15d
+    Phase 7 連携・通知・権限    :p7, after p5, 25d
+      </pre></div>
+
+      <h3 id="phase0">Phase 0: 基盤準備（3〜5日）</h3>
+      <p><b>目的</b>: CRMモジュールの骨格を作成し、既存コードに影響なく並行開発できる状態にする。</p>
+      <ul>
+        <li><code>src/server/crm/</code> ディレクトリ構造作成</li>
+        <li><code>INVITE_SALES_STORAGE_BACKEND=firestore</code> をCRM前提として有効化</li>
+        <li>local/dev向け Firestore Emulator 起動手順追加</li>
+        <li>CRM用Firestoreリポジトリ基盤（CRUD抽象）</li>
+        <li><code>crm_api.py</code> ルーター登録（<code>main.py</code> に追加）</li>
+        <li>actor解決ヘルパー追加（<code>tenant_session</code> + <code>X-Tenant-Employee-Id</code>）</li>
+        <li><code>frontend/src/crm/</code> ディレクトリ構造作成</li>
+        <li><code>CrmLayout</code> コンポーネント（サイドバー + コンテンツ）</li>
+        <li><code>App.tsx</code> に nested route として <code>/crm</code> を追加</li>
+        <li>テスト基盤</li>
+      </ul>
+      <p><b>成果物</b>: <code>/crm</code> にアクセスすると空のダッシュボードが表示される。</p>
+
+      <h3 id="phase1">Phase 1: 顧客管理コア（2〜3週間）</h3>
+      <p><b>目的</b>: 既存leadを「顧客」として管理できるようにする。<b>依存: Phase 0</b></p>
+      <ul>
+        <li>Customer データモデル + Firestore CRUD</li>
+        <li>既存lead → customer 自動変換ロジック（初回は 1 lead = 1 customer）</li>
+        <li>顧客一覧API + 顧客一覧画面</li>
+        <li>顧客詳細API + 顧客カード画面</li>
+        <li>フェーズ遷移API + カンバンビュー</li>
+        <li>タイムラインAPI + タイムライン表示</li>
+        <li>merge UI と暫定重複候補表示</li>
+        <li>顧客検索・フィルタ</li>
+        <li>ユニットテスト</li>
+      </ul>
+      <p><b>成果物</b>: カンバンで顧客をフェーズ管理でき、タイムラインが見える。データモデルの詳細は <a href="crm-data-model.html">CRMデータモデル設計</a> を参照。</p>
+
+      <h3 id="phase2">Phase 2: タスク管理（1〜2週間）</h3>
+      <p><b>目的</b>: 「本日のタスク」で営業の日次アクションを管理。<b>依存: Phase 1</b></p>
+      <ul>
+        <li>CrmTask データモデル + CRUD</li>
+        <li>タスク一覧API + タスクリスト画面</li>
+        <li>フェーズ遷移時の自動タスク生成</li>
+        <li>ダッシュボードへのタスク統合</li>
+        <li>テスト</li>
+      </ul>
+      <p><b>成果物</b>: 担当者が「今日やること」リストで仕事を進められる。</p>
+
+      <h3 id="phase3">Phase 3: AIヒアリング統合強化（1〜2週間）</h3>
+      <p><b>目的</b>: ヒアリング完了 → CRM自動連携をシームレスにする。<b>依存: Phase 1</b></p>
+      <ul>
+        <li><code>complete_session</code> にCRMイベントフック追加</li>
+        <li>ヒアリング完了 → フェーズ自動遷移</li>
+        <li>ニーズ構造タグの自動抽出・表示</li>
+        <li>顧客カードへのAIプロファイル統合表示</li>
+        <li>CRM画面からのヒアリングURL発行</li>
+        <li>テスト</li>
+      </ul>
+      <p><b>成果物</b>: ヒアリング完了が即座にCRMに反映される。</p>
+
+      <h3 id="phase4">Phase 4: 追客・コミュニケーション（3〜4週間）</h3>
+      <p><b>目的</b>: CRMから顧客に連絡できるようにする。<b>依存: Phase 1</b></p>
+      <ul>
+        <li>通話記録（手動ログ）</li>
+        <li>メールテンプレート + 送信</li>
+        <li>LINE連携（Channel設定 + Webhook + 送受信）</li>
+        <li>コミュニケーション履歴表示</li>
+        <li>タイムラインへの自動記録</li>
+        <li>テスト</li>
+      </ul>
+      <p><b>成果物</b>: CRM画面を離れずに電話/メール/LINEの記録・送受信ができる。</p>
+
+      <h3 id="phase5">Phase 5: 反響管理（3〜4週間）</h3>
+      <p><b>目的</b>: ポータルサイトの反響を自動取込。<b>依存: Phase 1, Phase 4</b></p>
+      <ul>
+        <li>Gmail API 連携（メール取込）</li>
+        <li>SUUMO/HOME'S メールパーサー</li>
+        <li>反響受信トレイUI</li>
+        <li>正規化 + search hash による重複顧客検知</li>
+        <li>自動割当（ラウンドロビン）</li>
+        <li>サンクスメール自動送信</li>
+        <li>テスト</li>
+      </ul>
+      <p><b>成果物</b>: SUUMOの反響が自動で顧客レコードになり、担当者に通知される。</p>
+
+      <h3 id="phase6">Phase 6: 分析・レポート（2〜3週間）</h3>
+      <p><b>目的</b>: 経営者向けROI可視化と現場改善データ。<b>依存: Phase 1, Phase 3</b></p>
+      <ul>
+        <li>ダッシュボードKPI実装</li>
+        <li>デュアルファネル</li>
+        <li>Per Heim経由 vs 非経由 比較</li>
+        <li>リードタイム分析</li>
+        <li>月次レポート生成</li>
+        <li>テスト</li>
+      </ul>
+      <p><b>成果物</b>: 「Per Heimを使うと来店率がX%上がる」をデータで示せる。詳細は <a href="crm-bunseki-report.html">分析レポート詳細</a> を参照。</p>
+
+      <h3 id="phase7">Phase 7: 連携・通知・権限（3〜4週間）</h3>
+      <p><b>目的</b>: 運用に必要な横断機能。<b>依存: Phase 1〜6</b></p>
+      <ul>
+        <li>Google Calendar 連携</li>
+        <li>CSVインポート</li>
+        <li>通知基盤（Web Push + メール）</li>
+        <li>権限マトリクス実装（管理者/マネージャー/担当者の3ロール）</li>
+        <li>監査ログ強化</li>
+        <li>テスト</li>
+      </ul>
+      <p><b>成果物</b>: 実運用に耐えるCRM。詳細な通知設計は <a href="crm-tsuchi-sekkei.html">通知設計詳細</a> を参照。</p>
+
+      <h3 id="phase-summary">フェーズ全体サマリー</h3>
+      <table>
+        <thead>
+          <tr><th>フェーズ</th><th>内容</th><th>工数目安</th><th>依存</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Phase 0</td><td>基盤準備</td><td>3〜5日</td><td>なし</td></tr>
+          <tr><td>Phase 1</td><td>顧客管理コア</td><td>2〜3週間</td><td>Phase 0</td></tr>
+          <tr><td>Phase 2</td><td>タスク管理</td><td>1〜2週間</td><td>Phase 1</td></tr>
+          <tr><td>Phase 3</td><td>AIヒアリング統合</td><td>1〜2週間</td><td>Phase 1</td></tr>
+          <tr><td>Phase 4</td><td>追客・コミュニケーション</td><td>3〜4週間</td><td>Phase 1</td></tr>
+          <tr><td>Phase 5</td><td>反響管理</td><td>3〜4週間</td><td>Phase 1, Phase 4</td></tr>
+          <tr><td>Phase 6</td><td>分析・レポート</td><td>2〜3週間</td><td>Phase 1, Phase 3</td></tr>
+          <tr><td>Phase 7</td><td>連携・通知・権限</td><td>3〜4週間</td><td>Phase 1〜6</td></tr>
+          <tr><td colspan="2"><b>合計</b></td><td colspan="2"><b>約16〜23週（4〜6ヶ月）</b></td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- リスクと対策 -->
+      <!-- ============================================ -->
+      <h2 id="risk">リスクと対策</h2>
+      <p>CRM統合に伴う主要リスクを<b>技術リスク</b>と<b>運用リスク</b>に分類し、それぞれ対策を定義する。</p>
+
+      <h3 id="tech-risk">技術リスク</h3>
+      <table>
+        <thead>
+          <tr><th>リスク</th><th>影響度</th><th>対策</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Firestore単一ドキュメント制限（1MB）</b></td>
+            <td>高</td>
+            <td>CRMデータは<b>個別コレクション方式</b>で回避。詳細は <a href="crm-data-model.html">CRMデータモデル設計</a> を参照</td>
+          </tr>
+          <tr>
+            <td><b>既存 invite_sales への影響</b></td>
+            <td>高</td>
+            <td><b>読み取り専用参照</b> + イベントフックのみ。<a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a>の原則に従う</td>
+          </tr>
+          <tr>
+            <td><b>LINE APIの1:N店舗共有パターン</b></td>
+            <td>中</td>
+            <td><code>user_id</code> → <code>customer_id</code> マッピングテーブルで対応</td>
+          </tr>
+          <tr>
+            <td><b>メールパースの精度</b></td>
+            <td>中</td>
+            <td><code>manual_review</code> フォールバック + 段階的改善</td>
+          </tr>
+          <tr>
+            <td><b>フロントエンドの複雑化</b></td>
+            <td>中</td>
+            <td>CRMを<b>独立モジュール</b>として分離（<code>frontend/src/crm/</code>）</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="ops-risk">運用リスク</h3>
+      <table>
+        <thead>
+          <tr><th>リスク</th><th>影響度</th><th>対策</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>既存テナントのマイグレーション</b></td>
+            <td>高</td>
+            <td>lead → customer 自動変換 + <b>段階的ロールアウト</b></td>
+          </tr>
+          <tr>
+            <td><b>CRM画面と既存SalesConsoleの共存</b></td>
+            <td>中</td>
+            <td>サイドバーから旧画面にリンク + <b>段階的移行</b></td>
+          </tr>
+          <tr>
+            <td><b>Firestoreコスト増加</b></td>
+            <td>低</td>
+            <td>インデックス最適化 + 読み取りキャッシュ</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- 判断が必要な項目 -->
+      <!-- ============================================ -->
+      <h2 id="handan">判断が必要な項目</h2>
+      <p>以下は設計書の前提として<b>ユーザーの判断を仰ぎたい</b>ポイントをまとめたものである。アーキテクチャ・機能スコープ・UXの3分野に分類する。</p>
+
+      <h3 id="arch-judgment">アーキテクチャ判断（A1〜A3）</h3>
+      <table>
+        <thead>
+          <tr><th>#</th><th>項目</th><th>選択肢</th><th>推奨</th><th>理由</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>A1</td>
+            <td>CRMを同一リポジトリに入れるか</td>
+            <td>同一 / 別</td>
+            <td><b>同一</b></td>
+            <td>Firestore・認証・Cloud Runを共有でき開発効率が高い</td>
+          </tr>
+          <tr>
+            <td>A2</td>
+            <td>Firestoreコレクション設計</td>
+            <td>単一ドキュメント / 個別コレクション</td>
+            <td><b>個別コレクション</b></td>
+            <td>データ量増加に耐えるため</td>
+          </tr>
+          <tr>
+            <td>A3</td>
+            <td>既存SalesConsoleの扱い</td>
+            <td>維持+並行運用 / CRMに統合して廃止</td>
+            <td><b>維持+並行運用</b> → 段階的にCRMに機能移行</td>
+            <td>既存テナントへの影響を最小化</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="scope-judgment">機能スコープ判断（S1〜S3）</h3>
+      <table>
+        <thead>
+          <tr><th>#</th><th>項目</th><th>選択肢</th><th>推奨</th><th>理由</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>S1</td>
+            <td>MVPでL1を全部やるか</td>
+            <td>全部 / 段階的</td>
+            <td><b>段階的</b>（Phase 1〜3 = 最小MVP）</td>
+            <td>顧客管理 + AI統合だけで差別化価値が出る</td>
+          </tr>
+          <tr>
+            <td>S2</td>
+            <td>LINE連携の優先度</td>
+            <td>Phase 4 / もっと後</td>
+            <td><b>Phase 4</b></td>
+            <td>不動産業界ではLINE必須</td>
+          </tr>
+          <tr>
+            <td>S3</td>
+            <td>メールパースの対象ポータル</td>
+            <td>SUUMO + HOME'S / それ以上</td>
+            <td><b>SUUMO + HOME'S</b> のみ</td>
+            <td>シェア上位2つでカバー率80%超</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="ux-judgment">UX判断（U1〜U2）</h3>
+      <table>
+        <thead>
+          <tr><th>#</th><th>項目</th><th>選択肢</th><th>推奨</th><th>理由</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>U1</td>
+            <td>CRM主画面</td>
+            <td>カンバン / タスクリスト</td>
+            <td><b>管理者=カンバン、担当者=タスクリスト</b></td>
+            <td>CRM v3.2 の仕様通り</td>
+          </tr>
+          <tr>
+            <td>U2</td>
+            <td>既存 /sales からCRMへの導線</td>
+            <td>リダイレクト / ヘッダーリンク</td>
+            <td><b>ヘッダーリンク</b></td>
+            <td>段階的移行で混乱を防ぐ</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="mermaid-container"><pre class="mermaid">
+graph TD
+    subgraph Phase0["Phase 0: 基盤準備"]
+        P0["ディレクトリ構造<br/>ルーター登録<br/>テスト基盤"]
+    end
+
+    subgraph MVP["最小MVP"]
+        P1["Phase 1: 顧客管理コア"]
+        P2["Phase 2: タスク管理"]
+        P3["Phase 3: AI統合強化"]
+    end
+
+    subgraph Comms["追客・反響"]
+        P4["Phase 4: 追客・<br/>コミュニケーション"]
+        P5["Phase 5: 反響管理"]
+    end
+
+    subgraph Analytics["分析・運用"]
+        P6["Phase 6: 分析・レポート"]
+        P7["Phase 7: 連携・通知・権限"]
+    end
+
+    P0 --> P1
+    P1 --> P2
+    P1 --> P3
+    P1 --> P4
+    P4 --> P5
+    P1 --> P6
+    P3 --> P6
+    P5 --> P7
+    P6 --> P7
+
+    style Phase0 fill:#e8f5e9,stroke:#4caf50
+    style MVP fill:#e3f2fd,stroke:#2196f3
+    style Comms fill:#fff3e0,stroke:#ff9800
+    style Analytics fill:#fce4ec,stroke:#e91e63
+      </pre></div>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#tsuchi-sekkei">通知設計</a></li>
+          <li class="toc-h3"><a href="#tsuchi-channel">通知チャネル</a></li>
+          <li class="toc-h3"><a href="#tsuchi-events">通知イベント一覧</a></li>
+          <li class="toc-h3"><a href="#tsuchi-architecture">通知実装アーキテクチャ</a></li>
+          <li><a href="#bunseki-report">分析・レポート設計</a></li>
+          <li class="toc-h3"><a href="#dual-funnel">デュアルファネル</a></li>
+          <li class="toc-h3"><a href="#roi-metrics">ROI訴求指標（RoiMetrics）</a></li>
+          <li class="toc-h3"><a href="#shukei-houshiki">集計方式</a></li>
+          <li><a href="#hi-kinou-youken">非機能要件</a></li>
+          <li class="toc-h3"><a href="#performance">パフォーマンス基準</a></li>
+          <li class="toc-h3"><a href="#firestore-index">Firestoreインデックス設計</a></li>
+          <li class="toc-h3"><a href="#security">セキュリティ</a></li>
+          <li class="toc-h3"><a href="#data-retention">データ保持期間</a></li>
+          <li><a href="#jissou-phase">実装フェーズ計画</a></li>
+          <li class="toc-h3"><a href="#phase0">Phase 0: 基盤準備</a></li>
+          <li class="toc-h3"><a href="#phase1">Phase 1: 顧客管理コア</a></li>
+          <li class="toc-h3"><a href="#phase2">Phase 2: タスク管理</a></li>
+          <li class="toc-h3"><a href="#phase3">Phase 3: AIヒアリング統合強化</a></li>
+          <li class="toc-h3"><a href="#phase4">Phase 4: 追客・コミュニケーション</a></li>
+          <li class="toc-h3"><a href="#phase5">Phase 5: 反響管理</a></li>
+          <li class="toc-h3"><a href="#phase6">Phase 6: 分析・レポート</a></li>
+          <li class="toc-h3"><a href="#phase7">Phase 7: 連携・通知・権限</a></li>
+          <li class="toc-h3"><a href="#phase-summary">フェーズ全体サマリー</a></li>
+          <li><a href="#risk">リスクと対策</a></li>
+          <li class="toc-h3"><a href="#tech-risk">技術リスク</a></li>
+          <li class="toc-h3"><a href="#ops-risk">運用リスク</a></li>
+          <li><a href="#handan">判断が必要な項目</a></li>
+          <li class="toc-h3"><a href="#arch-judgment">アーキテクチャ判断</a></li>
+          <li class="toc-h3"><a href="#scope-judgment">機能スコープ判断</a></li>
+          <li class="toc-h3"><a href="#ux-judgment">UX判断</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+          <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+          <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+          <li><a href="crm-tsuchi-sekkei.html">通知設計詳細</a></li>
+          <li><a href="crm-bunseki-report.html">分析レポート詳細</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+        <li><a href="crm-tsuchi-sekkei.html">通知設計詳細</a></li>
+        <li><a href="crm-bunseki-report.html">分析レポート詳細</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

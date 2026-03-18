@@ -1,4 +1,28 @@
 {
-  "nodes": [],
-  "links": []
+  "nodes": [
+    {"id": "perheim-crm-tougou-sekkei", "title": "Per Heim CRM v3.2 統合設計書", "url": "articles/perheim-crm-tougou-sekkei.html", "summary": "Per HeimにCRM v3.2機能を統合するための包括的設計書", "is_root": true},
+    {"id": "hybrid-kakuchou-architecture", "title": "ハイブリッド拡張アーキテクチャ", "url": "articles/hybrid-kakuchou-architecture.html", "summary": "既存AIヒアリング機能を維持しつつCRM機能を独立モジュールとして追加するハイブリッド拡張アーキテクチャ設計", "is_root": false},
+    {"id": "crm-data-model", "title": "CRMデータモデル設計", "url": "articles/crm-data-model.html", "summary": "Firestoreコレクション設計と各データモデルの詳細仕様、leadからcustomerへのマイグレーション戦略", "is_root": false},
+    {"id": "crm-api-sekkei", "title": "CRM API設計", "url": "articles/crm-api-sekkei.html", "summary": "顧客管理・タスク管理・追客・反響管理・分析・カンバンの全APIエンドポイント設計", "is_root": false},
+    {"id": "crm-frontend-sekkei", "title": "CRMフロントエンド設計", "url": "articles/crm-frontend-sekkei.html", "summary": "ダッシュボード・カンバン・顧客カードの画面仕様とルーティング・CSS設計", "is_root": false},
+    {"id": "crm-jissou-phase", "title": "CRM実装フェーズ計画", "url": "articles/crm-jissou-phase.html", "summary": "Phase 0〜7の段階的実装計画、通知・分析・非機能要件・リスク対策", "is_root": false}
+  ],
+  "links": [
+    {"source": "perheim-crm-tougou-sekkei", "target": "hybrid-kakuchou-architecture"},
+    {"source": "perheim-crm-tougou-sekkei", "target": "crm-data-model"},
+    {"source": "perheim-crm-tougou-sekkei", "target": "crm-api-sekkei"},
+    {"source": "perheim-crm-tougou-sekkei", "target": "crm-frontend-sekkei"},
+    {"source": "perheim-crm-tougou-sekkei", "target": "crm-jissou-phase"},
+    {"source": "hybrid-kakuchou-architecture", "target": "perheim-crm-tougou-sekkei"},
+    {"source": "hybrid-kakuchou-architecture", "target": "crm-data-model"},
+    {"source": "crm-data-model", "target": "perheim-crm-tougou-sekkei"},
+    {"source": "crm-api-sekkei", "target": "perheim-crm-tougou-sekkei"},
+    {"source": "crm-api-sekkei", "target": "crm-data-model"},
+    {"source": "crm-frontend-sekkei", "target": "perheim-crm-tougou-sekkei"},
+    {"source": "crm-frontend-sekkei", "target": "crm-api-sekkei"},
+    {"source": "crm-frontend-sekkei", "target": "crm-data-model"},
+    {"source": "crm-jissou-phase", "target": "perheim-crm-tougou-sekkei"},
+    {"source": "crm-jissou-phase", "target": "hybrid-kakuchou-architecture"},
+    {"source": "crm-jissou-phase", "target": "crm-data-model"}
+  ]
 }

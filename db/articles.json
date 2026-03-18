@@ -1,5 +1,90 @@
 {
-  "articles": {},
-  "root_id": null,
-  "total_count": 0
+  "articles": {
+    "perheim-crm-tougou-sekkei": {
+      "id": "perheim-crm-tougou-sekkei",
+      "title": "Per Heim CRM v3.2 統合設計書",
+      "filename": "articles/perheim-crm-tougou-sekkei.html",
+      "created_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-18T00:00:00+09:00",
+      "parent_id": null,
+      "depth": 0,
+      "links_to": ["hybrid-kakuchou-architecture", "crm-data-model", "crm-api-sekkei", "crm-frontend-sekkei", "crm-jissou-phase"],
+      "linked_from": ["hybrid-kakuchou-architecture", "crm-api-sekkei", "crm-data-model", "crm-frontend-sekkei", "crm-jissou-phase"],
+      "summary": "Per HeimにCRM v3.2機能を統合するための包括的設計書。ハイブリッド拡張アーキテクチャにより既存AIヒアリング機能を維持しつつ、反響取込・顧客管理・追客・分析を実現する。",
+      "expansion_status": "expanded",
+      "interestingness_score": 1.0
+    },
+    "hybrid-kakuchou-architecture": {
+      "id": "hybrid-kakuchou-architecture",
+      "title": "ハイブリッド拡張アーキテクチャ",
+      "filename": "articles/hybrid-kakuchou-architecture.html",
+      "created_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-18T00:00:00+09:00",
+      "parent_id": "perheim-crm-tougou-sekkei",
+      "depth": 1,
+      "links_to": ["perheim-crm-tougou-sekkei", "crm-ninshou-kengen", "crm-gaibu-renkei", "crm-data-model"],
+      "linked_from": ["perheim-crm-tougou-sekkei", "crm-jissou-phase"],
+      "summary": "Per Heim CRM v3.2統合におけるハイブリッド拡張アーキテクチャの全体設計。既存AIヒアリング機能を一切変更せず、CRM機能を独立モジュールとして追加し、Firestoreを共有データ基盤とする方針を定義する。",
+      "expansion_status": "pending",
+      "interestingness_score": 0.95
+    },
+    "crm-data-model": {
+      "id": "crm-data-model",
+      "title": "CRMデータモデル設計",
+      "filename": "articles/crm-data-model.html",
+      "created_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-18T00:00:00+09:00",
+      "parent_id": "perheim-crm-tougou-sekkei",
+      "depth": 1,
+      "links_to": ["perheim-crm-tougou-sekkei", "crm-phase-kanri", "crm-pii-angou"],
+      "linked_from": ["perheim-crm-tougou-sekkei", "hybrid-kakuchou-architecture", "crm-api-sekkei", "crm-frontend-sekkei", "crm-jissou-phase"],
+      "summary": "Per Heim CRM v3.2におけるFirestoreコレクション設計と各データモデル（顧客・タスク・タイムライン・コミュニケーション・反響）の詳細仕様。既存lead構造からcustomerモデルへのマイグレーション戦略を含む。",
+      "expansion_status": "pending",
+      "interestingness_score": 0.95
+    },
+    "crm-api-sekkei": {
+      "id": "crm-api-sekkei",
+      "title": "CRM API設計",
+      "filename": "articles/crm-api-sekkei.html",
+      "created_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-18T00:00:00+09:00",
+      "parent_id": "perheim-crm-tougou-sekkei",
+      "depth": 1,
+      "links_to": ["perheim-crm-tougou-sekkei", "crm-data-model", "crm-webhook-sekkei"],
+      "linked_from": ["perheim-crm-tougou-sekkei", "crm-frontend-sekkei"],
+      "summary": "Per Heim CRM v3.2の全APIエンドポイント設計。顧客管理・タスク管理・追客・反響管理・分析・カンバンの各APIを定義し、RESTful設計原則に基づくリソース指向インターフェースを提供する。",
+      "expansion_status": "pending",
+      "interestingness_score": 0.9
+    },
+    "crm-frontend-sekkei": {
+      "id": "crm-frontend-sekkei",
+      "title": "CRMフロントエンド設計",
+      "filename": "articles/crm-frontend-sekkei.html",
+      "created_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-18T00:00:00+09:00",
+      "parent_id": "perheim-crm-tougou-sekkei",
+      "depth": 1,
+      "links_to": ["perheim-crm-tougou-sekkei", "crm-api-sekkei", "crm-data-model", "crm-kanban-jissou"],
+      "linked_from": ["perheim-crm-tougou-sekkei"],
+      "summary": "Per Heim CRM v3.2のフロントエンド設計。ダッシュボード・カンバン・顧客カードの主要3画面を中心に、ディレクトリ構造、ルーティング、コンポーネント設計、CSS方針を包括的に記述する。",
+      "expansion_status": "pending",
+      "interestingness_score": 0.9
+    },
+    "crm-jissou-phase": {
+      "id": "crm-jissou-phase",
+      "title": "CRM実装フェーズ計画",
+      "filename": "articles/crm-jissou-phase.html",
+      "created_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-18T00:00:00+09:00",
+      "parent_id": "perheim-crm-tougou-sekkei",
+      "depth": 1,
+      "links_to": ["perheim-crm-tougou-sekkei", "hybrid-kakuchou-architecture", "crm-data-model", "crm-tsuchi-sekkei", "crm-bunseki-report"],
+      "linked_from": ["perheim-crm-tougou-sekkei"],
+      "summary": "Per Heim CRM v3.2の段階的実装計画。Phase 0〜7の全8段階のロードマップに加え、通知設計、分析・レポート設計、非機能要件、リスクと対策、判断が必要な項目を包括的にカバーする。",
+      "expansion_status": "pending",
+      "interestingness_score": 0.9
+    }
+  },
+  "root_id": "perheim-crm-tougou-sekkei",
+  "total_count": 6
 }

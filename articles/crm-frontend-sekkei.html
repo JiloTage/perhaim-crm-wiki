@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRMフロントエンド設計 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; CRMフロントエンド設計
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">CRMフロントエンド設計</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2のフロントエンド設計を定義する。ダッシュボード・カンバン・顧客カードの主要3画面を中心に、ディレクトリ構造、ルーティング、コンポーネント設計、CSS方針を包括的に記述する。</div>
+
+      <p>
+        Per Heim CRM v3.2 のフロントエンドは、既存の<b>AIヒアリング画面</b>とは完全に独立した<b>デスクトップ最適化レイアウト</b>として設計される。
+        既存の <code>frontend/src/</code> 配下に <code>crm/</code> ディレクトリを新設し、<b>CrmLayout</b> コンポーネントによる独自のサイドバー＋コンテンツ構造を持つ。
+        画面構成は<b>ダッシュボード</b>（KPI・ファネル・タスク一覧）、<b>カンバンビュー</b>（フェーズ別ドラッグ&amp;ドロップ）、<b>顧客カード</b>（AIプロファイル・タイムライン）の3主要画面を核とし、
+        タスク管理・反響受信トレイ・分析・設定画面を加えた計8画面で構成される。
+        詳細な統合方針は<a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a>を、
+        バックエンドAPIは<a href="crm-api-sekkei.html">CRM API設計</a>を、
+        データモデルは<a href="crm-data-model.html">CRMデータモデル設計</a>を参照のこと。
+      </p>
+
+      <h2 id="directory-structure">フロントエンドディレクトリ構造</h2>
+
+      <p>CRMフロントエンドのコードは <code>frontend/src/crm/</code> 配下に集約される。既存の <code>pages/SalesConsole.tsx</code> や <code>pages/CompanyConsole.tsx</code> には一切手を加えない。</p>
+
+      <pre><code>frontend/src/
+├── pages/                    # 既存ページ（変更しない）
+│   ├── SalesConsole.tsx      # 既存：招待管理画面（維持）
+│   └── CompanyConsole.tsx    # 既存：会社管理（維持）
+│
+├── crm/                      # ★新規：CRM画面
+│   ├── CrmApp.tsx            # CRMルートコンポーネント（CrmLayout含む）
+│   ├── pages/
+│   │   ├── Dashboard.tsx        # ダッシュボード（KPI + ファネル）
+│   │   ├── CustomerKanban.tsx   # カンバンビュー
+│   │   ├── CustomerList.tsx     # 顧客一覧（テーブル）
+│   │   ├── CustomerDetail.tsx   # 顧客カード（詳細）
+│   │   ├── TaskList.tsx         # 本日のタスクリスト
+│   │   ├── Analytics.tsx        # 分析ダッシュボード
+│   │   ├── InquiryInbox.tsx     # 反響受信トレイ
+│   │   └── Settings.tsx         # CRM設定
+│   ├── components/
+│   │   ├── KanbanBoard.tsx      # カンバンボード
+│   │   ├── KanbanColumn.tsx     # カンバンカラム
+│   │   ├── CustomerCard.tsx     # 顧客カードコンポーネント
+│   │   ├── Timeline.tsx         # タイムライン表示
+│   │   ├── TimelineEvent.tsx    # タイムラインイベント
+│   │   ├── TaskItem.tsx         # タスク行
+│   │   ├── PhaseTag.tsx         # フェーズバッジ
+│   │   ├── NeedsProfile.tsx     # AIプロファイル表示（NeedsTags）
+│   │   ├── CommunicationPanel.tsx # 追客パネル
+│   │   ├── InquiryParser.tsx    # 反響パース結果表示
+│   │   ├── FunnelChart.tsx      # ファネルチャート
+│   │   └── CrmSidebar.tsx       # CRMサイドバー
+│   ├── hooks/
+│   │   ├── useCrmApi.ts         # CRM API共通hooks
+│   │   ├── useCustomers.ts      # 顧客データ管理
+│   │   ├── useTasks.ts          # タスク管理
+│   │   └── useAnalytics.ts      # 分析データ
+│   └── types.ts                 # CRM型定義（CustomerPhase等）
+│
+└── App.tsx                   # ルーティング追加</code></pre>
+
+      <p><b>4層構成</b>の設計思想:</p>
+      <ul>
+        <li><b>pages/</b> — ルーティングに対応する画面単位のコンポーネント。各ページは hooks を通じてデータを取得し、components を組み合わせてUIを構築する</li>
+        <li><b>components/</b> — 再利用可能なUIパーツ。カンバンカラム、タイムラインイベント、フェーズバッジなど、複数ページから参照される</li>
+        <li><b>hooks/</b> — <a href="crm-api-sekkei.html">CRM API</a>との通信ロジックを集約。<code>useCrmApi.ts</code> が共通のfetch/エラーハンドリングを提供し、各ドメインhooksがラップする</li>
+        <li><b>types.ts</b> — <code>CustomerPhase</code>, <code>Customer</code>, <code>CrmTask</code> 等のTypeScript型定義。<a href="crm-data-model.html">データモデル設計</a>と1:1対応</li>
+      </ul>
+
+      <h2 id="routing">ルーティング設計</h2>
+
+      <p>CRM画面のルーティングは <b>React Router</b> のネストルート構成を採用し、既存の <code>RequireTenantAuth</code> コンポーネントで認証ガードする。</p>
+
+      <pre><code>// App.tsx に追加するルート
+&lt;Route element={&lt;RequireTenantAuth /&gt;}&gt;
+  &lt;Route path="crm" element={&lt;CrmApp /&gt;}&gt;
+    &lt;Route index element={&lt;Dashboard /&gt;} /&gt;
+    &lt;Route path="customers" element={&lt;CustomerList /&gt;} /&gt;
+    &lt;Route path="customers/:customerId" element={&lt;CustomerDetail /&gt;} /&gt;
+    &lt;Route path="kanban" element={&lt;CustomerKanban /&gt;} /&gt;
+    &lt;Route path="tasks" element={&lt;TaskList /&gt;} /&gt;
+    &lt;Route path="inbox" element={&lt;InquiryInbox /&gt;} /&gt;
+    &lt;Route path="analytics" element={&lt;Analytics /&gt;} /&gt;
+    &lt;Route path="settings" element={&lt;Settings /&gt;} /&gt;
+  &lt;/Route&gt;
+&lt;/Route&gt;</code></pre>
+
+      <p>設計ポイント:</p>
+      <ul>
+        <li><code>/crm</code> がCRM機能全体のルートパスとなり、<code>CrmApp</code> コンポーネントが <b>CrmLayout</b>（サイドバー＋コンテンツ領域）を提供する</li>
+        <li><code>/crm</code> にアクセスすると <code>index</code> ルートによりダッシュボードが表示される</li>
+        <li><code>RequireTenantAuth</code> はテナントセッションCookieの有無を検証する既存コンポーネント。CRM固有の業務権限（admin/manager/sales）は各ページコンポーネント内で <code>tenant_employees.role</code> を参照して制御する</li>
+        <li>顧客詳細は <code>/crm/customers/:customerId</code> でパラメータルーティング。カンバンの顧客カードクリック時もこのパスへ遷移する</li>
+      </ul>
+
+      <h2 id="layout-sidebar">画面遷移とサイドバー</h2>
+
+      <p>CRMメイン画面は <b>CrmLayout</b> コンポーネントが定義するサイドバー＋コンテンツ構造で構成される。既存の <code>Layout.tsx</code> は変更せず、CRM画面では独自レイアウトを使用する。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+graph TD
+    subgraph CrmLayout["CrmLayout コンポーネント"]
+        direction LR
+        subgraph Sidebar["CrmSidebar (220px)"]
+            S1["📊 概要<br/>/crm"]
+            S2["📋 カンバン<br/>/crm/kanban"]
+            S3["👥 顧客一覧<br/>/crm/customers"]
+            S4["✅ タスク<br/>/crm/tasks"]
+            S5["📥 反響<br/>/crm/inbox"]
+            S6["📈 分析<br/>/crm/analytics"]
+            S7["⚙️ 設定<br/>/crm/settings"]
+            S8["📎 招待管理<br/>/sales（既存）"]
+        end
+        subgraph Content["コンテンツエリア (max 1200px)"]
+            C1["React Router Outlet<br/>選択された画面を表示"]
+        end
+    end
+
+    S1 --> C1
+    S2 --> C1
+    S3 --> C1
+    S4 --> C1
+    S5 --> C1
+    S6 --> C1
+    S7 --> C1
+      </pre></div>
+
+      <p><b>CrmLayout</b> の責務:</p>
+      <ul>
+        <li>左側に固定幅（<code>--crm-sidebar-width: 220px</code>）の <b>CrmSidebar</b> を配置</li>
+        <li>右側のコンテンツ領域に React Router の <code>&lt;Outlet /&gt;</code> を配置し、選択されたページコンポーネントを描画</li>
+        <li>サイドバー最下部に「📎 招待管理」リンクを設置し、既存の <code>SalesConsole</code> 画面へスムーズに遷移可能にする</li>
+        <li>モバイル幅（768px以下）ではサイドバーをハンバーガーメニュー化し、コンテンツエリアをフルワイドにする</li>
+      </ul>
+
+      <p>画面遷移の基本フロー:</p>
+      <ol>
+        <li>ログイン後、<code>/crm</code> にアクセスすると<b>ダッシュボード</b>が表示される</li>
+        <li>サイドバーから各画面へ遷移。URL直接入力によるディープリンクにも対応</li>
+        <li>カンバンビューの顧客カードクリック → <code>/crm/customers/:id</code> へ遷移（顧客カード表示）</li>
+        <li>顧客カードの「戻る」ボタン → ブラウザ履歴の <code>history.back()</code> で直前画面に復帰</li>
+      </ol>
+
+      <h2 id="dashboard">ダッシュボード</h2>
+
+      <p><code>/crm</code> のインデックスルートで表示されるダッシュボード画面は、営業チームの日常業務の起点となる画面である。4つのセクションで構成される。</p>
+
+      <h3 id="kpi-cards">KPIカード行</h3>
+      <p>画面上部に横並びで<b>5つのKPIカード</b>を配置する:</p>
+      <table>
+        <thead>
+          <tr><th>カード</th><th>表示値</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>新規反響</td><td>件数</td><td>直近7日間の新規反響数</td></tr>
+          <tr><td>ヒアリング中</td><td>件数</td><td>hearing_pending + hearing_active のフェーズにいる顧客数</td></tr>
+          <tr><td>来店予約</td><td>件数</td><td>visit_reserved フェーズの顧客数</td></tr>
+          <tr><td>成約</td><td>件数</td><td>当月の contracted フェーズ遷移数</td></tr>
+          <tr><td>完了率</td><td>%</td><td>ヒアリング完了率（hearing_done / hearing_active+hearing_pending+hearing_done）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="dual-funnel">デュアルファネル</h3>
+      <p>左カラムに<b>デュアルファネル</b>（<code>FunnelChart</code> コンポーネント）を配置。反響→ヒアリング→来店→成約の各フェーズ別顧客数を棒グラフ形式で表示する。<a href="crm-api-sekkei.html">分析API</a>の <code>GET /v1/tenant/crm/analytics/funnel</code> からデータを取得する。</p>
+
+      <h3 id="today-tasks">本日のタスク</h3>
+      <p>右カラムに<b>本日のタスク</b>リストを配置。<code>TaskItem</code> コンポーネントによるチェックリスト形式で、期限が今日以前の未完了タスクを優先度順に表示する。チェックボックスクリックで即時完了処理を実行する。</p>
+
+      <h3 id="recent-inquiries">直近の反響</h3>
+      <p>画面下部に<b>直近の反響</b>リストを表示。ソース（SUUMO/HOME'S等）のアイコン、顧客名、連絡先（マスク表示）、経過時間を1行ずつ表示する。クリックで対応する顧客カードへ遷移する。</p>
+
+      <h2 id="kanban">カンバンビュー</h2>
+
+      <p><code>/crm/kanban</code> で表示されるカンバンビューは、<b>CustomerPhase</b>（フェーズ）をカラムとして顧客カードを視覚的に管理する画面である。実装の詳細は<a href="crm-kanban-jissou.html">カンバン実装詳細</a>を参照。</p>
+
+      <h3 id="kanban-columns">フェーズ別カラム構成</h3>
+      <p><code>KanbanBoard</code> コンポーネントが横スクロール可能なカラムコンテナを提供し、各カラムは <code>KanbanColumn</code> コンポーネントで描画される。デフォルトの表示カラム:</p>
+      <table>
+        <thead>
+          <tr><th>カラム</th><th>フェーズ値</th><th>表示例</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>反響</td><td><code>inquiry</code></td><td>SUUMO反響 田中様 5分前</td></tr>
+          <tr><td>ヒアリング待ち</td><td><code>hearing_pending</code></td><td>URL発行済み 山田様</td></tr>
+          <tr><td>ヒアリング済み</td><td><code>hearing_done</code></td><td>完了率100% 佐藤様</td></tr>
+          <tr><td>来店予約</td><td><code>visit_reserved</code></td><td>3/20 14:00 鈴木様</td></tr>
+          <tr><td>成約</td><td><code>contracted</code></td><td>完了 高橋様</td></tr>
+        </tbody>
+      </table>
+      <p>各カラムのヘッダーにはフェーズ名と件数を表示。カラム幅は <code>--crm-kanban-column-width: 280px</code> で統一する。</p>
+
+      <h3 id="drag-drop">ドラッグ&amp;ドロップでフェーズ遷移</h3>
+      <p>顧客カードを別カラムにドラッグ&amp;ドロップすることで、<a href="crm-api-sekkei.html">カンバンAPI</a>の <code>POST /v1/tenant/crm/kanban/move</code> を呼び出してフェーズ遷移を実行する。遷移時の挙動:</p>
+      <ul>
+        <li>ドロップ直後に<b>楽観的UI更新</b>（即座にカードを移動先カラムに表示）</li>
+        <li>API応答が成功なら確定、失敗なら元カラムにロールバック</li>
+        <li>フェーズ遷移ルールに違反する移動（例: inquiry → contracted への直接遷移）はAPIが拒否し、エラートースト表示</li>
+        <li>遷移時にオプションで理由（<code>reason</code>）を入力できるモーダルを表示可能</li>
+      </ul>
+
+      <h2 id="customer-card">顧客カード</h2>
+
+      <p><code>/crm/customers/:customerId</code> で表示される顧客カード画面は、1顧客のすべての情報を集約した詳細画面である。左右2ペインのレイアウトで構成される。</p>
+
+      <h3 id="basic-info">基本情報パネル（左ペイン）</h3>
+      <p>左側の狭幅パネルに以下を縦積みで表示:</p>
+      <ul>
+        <li><b>基本情報</b>: 顧客名、電話番号（マスク表示/クリックで表示）、メール、希望エリア</li>
+        <li><b>タスク</b>: この顧客に紐づく未完了タスクの一覧（<code>TaskItem</code>）</li>
+        <li><b>アクションパネル</b>: 「📞電話」「✉メール」「💬LINE」「📎URL発行」の4ボタン。各ボタンは追客操作を開始する</li>
+      </ul>
+
+      <h3 id="ai-profile">AIプロファイル表示（NeedsTags）</h3>
+      <p>右側のメインペインのタブの一つとして、AIヒアリング結果から構造化された <b>NeedsTags</b> を表示する。<a href="crm-data-model.html">データモデル</a>の <code>needs_tags</code> フィールドに対応し、以下の3カテゴリで色分け表示する:</p>
+      <ul>
+        <li><span style="color:#d32f2f;"><b>🔴 dealbreaker</b></span>（絶対NG条件）: 1階不可、築30年以上不可 など</li>
+        <li><span style="color:#388e3c;"><b>🟢 must</b></span>（必須条件）: 駅徒歩10分以内、2LDK以上 など</li>
+        <li><span style="color:#f9a825;"><b>🟡 nice_to_have</b></span>（あれば嬉しい条件）: オートロック、宅配ボックス など</li>
+      </ul>
+      <p><code>NeedsProfile</code> コンポーネントがこの表示を担当する。ヒアリング未完了の顧客には「AIプロファイル未取得」のプレースホルダーを表示する。</p>
+
+      <h3 id="timeline">タイムライン</h3>
+      <p>右側メインペインの「概要」タブに<b>タイムライン</b>を表示。<code>Timeline</code> + <code>TimelineEvent</code> コンポーネントで、顧客に紐づくすべてのイベントを時系列逆順で描画する:</p>
+      <ul>
+        <li>反響受信、ヒアリングURL送付、ヒアリング完了、フェーズ遷移、通話記録、メール送信、LINE送受信、来店記録、メモ追加 など</li>
+        <li>各イベントはアイコン＋日時＋概要の1行で表示。クリックで詳細展開</li>
+      </ul>
+
+      <h2 id="css-design">CSS設計</h2>
+
+      <p>CRM画面のCSS設計は、既存の<b>デザインシステム</b>（<code>frontend/src/design-system/tokens.css</code>）を継承しつつ、CRM固有の要件に対応するCSS変数を追加する方針をとる。</p>
+
+      <h3 id="css-variables">CRM専用CSS変数</h3>
+      <pre><code>:root {
+  /* CRM レイアウト */
+  --crm-sidebar-width: 220px;
+  --crm-content-max-width: 1200px;
+  --crm-kanban-column-width: 280px;
+
+  /* CRM カラー（既存トークン継承 + CRM拡張） */
+  --crm-phase-inquiry: #e3f2fd;
+  --crm-phase-hearing: #fff3e0;
+  --crm-phase-visit: #e8f5e9;
+  --crm-phase-contracted: #f3e5f5;
+  --crm-phase-lost: #fafafa;
+}</code></pre>
+
+      <h3 id="layout-policy">モバイル vs デスクトップレイアウト方針</h3>
+      <p>既存のヒアリング画面と CRM画面では<b>完全に別レイアウト</b>を採用する:</p>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>ヒアリング画面</th><th>CRM画面</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>最適化対象</b></td><td>モバイル（480px）</td><td>デスクトップ（1200px）</td></tr>
+          <tr><td><b>レイアウト</b></td><td>既存 Layout.tsx</td><td>CrmLayout（独自）</td></tr>
+          <tr><td><b>サイドバー</b></td><td>なし</td><td>固定220px（モバイルではハンバーガー化）</td></tr>
+          <tr><td><b>コンテンツ幅</b></td><td>max-width: 480px</td><td>max-width: 1200px</td></tr>
+          <tr><td><b>ユースケース</b></td><td>顧客がスマホで回答</td><td>営業担当がPCで操作</td></tr>
+        </tbody>
+      </table>
+      <p>CRM画面では <code>Layout.tsx</code> を変更せず、<code>CrmLayout</code> コンポーネントが <code>CrmApp.tsx</code> 内でフルワイドモードのレイアウトを提供する。カンバンビューは横スクロール対応とし、カラム数が多い場合もデスクトップで快適に操作できるようにする。</p>
+
+      <h2 id="component-diagram">コンポーネント構成図</h2>
+
+      <div class="mermaid-container"><pre class="mermaid">
+graph TD
+    CrmApp["CrmApp.tsx<br/>CrmLayout + Router Outlet"]
+    CrmApp --> Dashboard["Dashboard.tsx"]
+    CrmApp --> Kanban["CustomerKanban.tsx"]
+    CrmApp --> CustList["CustomerList.tsx"]
+    CrmApp --> CustDetail["CustomerDetail.tsx"]
+    CrmApp --> TaskPage["TaskList.tsx (page)"]
+    CrmApp --> InqInbox["InquiryInbox.tsx"]
+    CrmApp --> Analytics["Analytics.tsx"]
+    CrmApp --> Settings["Settings.tsx"]
+
+    Dashboard --> FunnelChart["FunnelChart"]
+    Dashboard --> TaskItem["TaskItem"]
+    Dashboard --> PhaseTag["PhaseTag"]
+
+    Kanban --> KanbanBoard["KanbanBoard"]
+    KanbanBoard --> KanbanColumn["KanbanColumn"]
+    KanbanColumn --> CustCard["CustomerCard"]
+    CustCard --> PhaseTag
+
+    CustDetail --> NeedsProfile["NeedsProfile<br/>(AIプロファイル)"]
+    CustDetail --> Timeline["Timeline"]
+    Timeline --> TimelineEvent["TimelineEvent"]
+    CustDetail --> CommPanel["CommunicationPanel"]
+    CustDetail --> TaskItem
+
+    subgraph hooks["hooks/"]
+        useCrmApi["useCrmApi.ts"]
+        useCustomers["useCustomers.ts"]
+        useTasks["useTasks.ts"]
+        useAnalytics["useAnalytics.ts"]
+    end
+
+    Dashboard -.-> useAnalytics
+    Dashboard -.-> useTasks
+    Kanban -.-> useCustomers
+    CustDetail -.-> useCustomers
+    CustDetail -.-> useTasks
+    TaskPage -.-> useTasks
+    useCustomers -.-> useCrmApi
+    useTasks -.-> useCrmApi
+    useAnalytics -.-> useCrmApi
+      </pre></div>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#directory-structure">フロントエンドディレクトリ構造</a></li>
+          <li><a href="#routing">ルーティング設計</a></li>
+          <li><a href="#layout-sidebar">画面遷移とサイドバー</a></li>
+          <li><a href="#dashboard">ダッシュボード</a></li>
+          <li class="toc-h3"><a href="#kpi-cards">KPIカード行</a></li>
+          <li class="toc-h3"><a href="#dual-funnel">デュアルファネル</a></li>
+          <li class="toc-h3"><a href="#today-tasks">本日のタスク</a></li>
+          <li class="toc-h3"><a href="#recent-inquiries">直近の反響</a></li>
+          <li><a href="#kanban">カンバンビュー</a></li>
+          <li class="toc-h3"><a href="#kanban-columns">フェーズ別カラム構成</a></li>
+          <li class="toc-h3"><a href="#drag-drop">ドラッグ&amp;ドロップでフェーズ遷移</a></li>
+          <li><a href="#customer-card">顧客カード</a></li>
+          <li class="toc-h3"><a href="#basic-info">基本情報パネル</a></li>
+          <li class="toc-h3"><a href="#ai-profile">AIプロファイル表示（NeedsTags）</a></li>
+          <li class="toc-h3"><a href="#timeline">タイムライン</a></li>
+          <li><a href="#css-design">CSS設計</a></li>
+          <li class="toc-h3"><a href="#css-variables">CRM専用CSS変数</a></li>
+          <li class="toc-h3"><a href="#layout-policy">モバイル vs デスクトップレイアウト方針</a></li>
+          <li><a href="#component-diagram">コンポーネント構成図</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+          <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+          <li><a href="crm-kanban-jissou.html">カンバン実装詳細</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+        <li><a href="crm-kanban-jissou.html">カンバン実装詳細</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

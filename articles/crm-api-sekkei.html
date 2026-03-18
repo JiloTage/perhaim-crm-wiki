@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRM API設計 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; CRM API設計
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">CRM API設計</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2の全APIエンドポイント設計。既存の<code>/v1/tenant/*</code>と共存する<b>CRM専用プレフィックス</b>配下に、顧客管理・タスク管理・追客・反響管理・分析・カンバンの各APIを定義し、RESTful設計原則に基づくリソース指向インターフェースを提供する。</div>
+
+      <!-- ===== 導入 ===== -->
+      <p><b>CRM API設計</b>は、<a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a>で定義された<b>ハイブリッド拡張アーキテクチャ</b>の中核を成すバックエンドインターフェース仕様である。既存の<b>AIヒアリングAPI</b>（<code>/v1/tenant/*</code>）を一切変更せず、新規の<b>CRM専用プレフィックス</b>（<code>/v1/tenant/crm/*</code>）配下に全エンドポイントを配置する。</p>
+      <p>本設計では、<a href="crm-data-model.html">CRMデータモデル設計</a>で定義された<b>Firestoreコレクション</b>に対する<b>CRUD操作</b>に加え、<b>フェーズ遷移</b>・<b>顧客マージ</b>・<b>追客記録</b>・<b>反響取込Webhook</b>・<b>分析集計</b>・<b>カンバン操作</b>など、CRM業務に特化したドメインアクションを提供する。すべての変更系操作は<b>タイムラインイベント</b>を副作用として生成し、顧客活動の完全な追跡を可能にする。</p>
+
+      <!-- ===== API全体構造 Mermaid ===== -->
+      <div class="mermaid-container"><pre class="mermaid">
+graph LR
+    subgraph existing["既存API（変更なし）"]
+        E1["/v1/tenant/leads/*"]
+        E2["/v1/tenant/sessions/*"]
+        E3["/v1/tenant/artifacts/*"]
+    end
+
+    subgraph crm["CRM API（新規）"]
+        C1["/v1/tenant/crm/customers/*"]
+        C2["/v1/tenant/crm/tasks/*"]
+        C3["/v1/tenant/crm/inquiries/*"]
+        C4["/v1/tenant/crm/analytics/*"]
+        C5["/v1/tenant/crm/kanban/*"]
+    end
+
+    subgraph webhook["Webhook"]
+        W1["POST /v1/webhook/inquiry-email"]
+    end
+
+    C1 -->|hearing-invite| E1
+    W1 -->|反響取込| C3
+    C5 -->|フェーズ遷移| C1
+
+    style existing fill:#f0f0f0,stroke:#999
+    style crm fill:#e8f4fd,stroke:#3b82f6
+    style webhook fill:#fef3c7,stroke:#f59e0b
+      </pre></div>
+
+      <!-- ===== H2: APIプレフィックスとバージョニング ===== -->
+      <h2 id="api-prefix">APIプレフィックスとバージョニング</h2>
+      <p>Per Heimの既存APIは <code>/v1/tenant/*</code> プレフィックス配下で<b>招待管理</b>・<b>セッション管理</b>・<b>アーティファクト取得</b>を提供している。CRM APIはこの既存構造と<b>完全に共存</b>する形で、専用のサブプレフィックスを追加する。</p>
+
+      <table>
+        <thead>
+          <tr><th>カテゴリ</th><th>プレフィックス</th><th>対象</th><th>状態</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>既存</td><td><code>/v1/tenant/*</code></td><td>招待管理、AIヒアリング</td><td>変更なし</td></tr>
+          <tr><td>CRM新規</td><td><code>/v1/tenant/crm/*</code></td><td>顧客・タスク・追客・分析</td><td>新規追加</td></tr>
+          <tr><td>Webhook</td><td><code>/v1/webhook/*</code></td><td>反響メール受信</td><td>新規追加</td></tr>
+        </tbody>
+      </table>
+
+      <p>バージョニング方針:</p>
+      <ul>
+        <li><b>URLパスベース</b>: <code>/v1/</code> をプレフィックスとし、メジャーバージョンのみをURLに含める</li>
+        <li><b>後方互換性</b>: 同一バージョン内ではフィールド追加のみ許容し、削除・型変更は次バージョンで実施</li>
+        <li><b>認証方式</b>: 既存のセッションCookie認証を共有。Webhookのみ別途<b>Webhook Secret</b>による認証</li>
+        <li><b>テナント分離</b>: すべてのリクエストはセッションから <code>tenant_id</code> を解決し、データアクセスをテナント単位で制限</li>
+      </ul>
+
+      <!-- ===== H2: 顧客管理API ===== -->
+      <h2 id="customer-api">顧客管理API</h2>
+      <p>顧客管理APIは<a href="crm-data-model.html">CRMデータモデル</a>の <code>customers</code> コレクションに対するCRUD操作と、ドメイン固有のアクション（フェーズ遷移、担当者変更、ヒアリングURL発行、マージ、重複検索）を提供する。</p>
+
+      <h3 id="customer-crud">CRUD操作</h3>
+      <table>
+        <thead>
+          <tr><th>メソッド</th><th>エンドポイント</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/v1/tenant/crm/customers</code></td><td>顧客一覧取得（ページネーション・フィルタ対応）</td></tr>
+          <tr><td><code>GET</code></td><td><code>/v1/tenant/crm/customers/{customer_id}</code></td><td>顧客詳細（タイムライン・タスク・コミュニケーション含む）</td></tr>
+          <tr><td><code>POST</code></td><td><code>/v1/tenant/crm/customers</code></td><td>顧客新規作成</td></tr>
+          <tr><td><code>PATCH</code></td><td><code>/v1/tenant/crm/customers/{customer_id}</code></td><td>顧客情報更新</td></tr>
+          <tr><td><code>DELETE</code></td><td><code>/v1/tenant/crm/customers/{customer_id}</code></td><td>顧客削除（論理削除）</td></tr>
+        </tbody>
+      </table>
+
+      <p><b>顧客一覧のクエリパラメータ</b>:</p>
+      <ul>
+        <li><code>phase</code>: フェーズでフィルタ（<code>new</code>, <code>responding</code>, <code>hearing</code>, <code>visit</code>, <code>negotiation</code>, <code>contracted</code>, <code>lost</code>）</li>
+        <li><code>search</code>: 名前・電話番号・メールアドレスでの検索</li>
+        <li><code>assigned_to</code>: 担当者IDでフィルタ</li>
+        <li><code>store_id</code>: 店舗IDでフィルタ</li>
+        <li><code>sort</code>: ソート指定（<code>updated_at</code>, <code>created_at</code>, <code>name</code>）</li>
+        <li><code>page</code>, <code>limit</code>: ページネーション（デフォルト: <code>page=1</code>, <code>limit=50</code>）</li>
+      </ul>
+
+      <p><b>顧客詳細レスポンス</b>は、顧客基本情報に加えて<b>タイムライン</b>・<b>タスク</b>・<b>コミュニケーション履歴</b>・<b>AIヒアリング成果物</b>を一括で返却する。これにより、顧客カード画面を1リクエストで描画可能にする。</p>
+
+      <h3 id="customer-actions">ドメインアクション</h3>
+      <table>
+        <thead>
+          <tr><th>メソッド</th><th>エンドポイント</th><th>説明</th><th>副作用</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/tenant/crm/customers/{id}/phase</code></td>
+            <td>フェーズ遷移</td>
+            <td>タイムラインイベント + 自動タスク生成</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/tenant/crm/customers/{id}/assign</code></td>
+            <td>担当者変更</td>
+            <td>タイムラインイベント</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/tenant/crm/customers/{id}/hearing-invite</code></td>
+            <td>AIヒアリングURL発行</td>
+            <td>既存lead作成 + customer.lead_ids追加</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/tenant/crm/customers/{id}/merge</code></td>
+            <td>顧客マージ</td>
+            <td>タイムライン統合 + タスク移行</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/tenant/crm/customers/{id}/duplicates</code></td>
+            <td>重複候補検索</td>
+            <td>なし（読み取り専用）</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p><b>フェーズ遷移</b>はCRM業務の中核操作であり、遷移時に以下の処理が自動実行される:</p>
+      <ol>
+        <li>顧客の <code>phase</code> フィールドを更新</li>
+        <li><b>タイムラインイベント</b>（<code>phase_changed</code>）を記録</li>
+        <li>遷移先フェーズに応じた<b>自動タスク</b>を生成（例: <code>hearing</code> → 「ヒアリング結果確認」タスク）</li>
+      </ol>
+
+      <p><b>重複候補検索</b>は、電話番号・メールアドレスの正規化後の<b>検索用ハッシュ</b>（<code>*_search_hash</code>）を使い、平文一致検索は行わない。これは<a href="crm-data-model.html">CRMデータモデル設計</a>のPII暗号化方針に準拠する。</p>
+
+      <p><b>ヒアリングURL発行</b>は既存の <code>invite_sales</code> のlead作成APIをラッパーとして呼び出し、CRM側の <code>customer.lead_ids</code> に追加する。これにより既存AIヒアリング機能を一切変更せずにCRMから利用可能にする。</p>
+
+      <!-- ===== H2: タスク管理API ===== -->
+      <h2 id="task-api">タスク管理API</h2>
+      <p>タスク管理APIは、営業担当者の日常業務を管理するためのエンドポイント群である。タスクは必ず<b>顧客に紐づき</b>、フェーズ遷移時の<b>自動生成タスク</b>と営業担当者が手動作成するタスクの両方を統一的に管理する。</p>
+
+      <table>
+        <thead>
+          <tr><th>メソッド</th><th>エンドポイント</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/v1/tenant/crm/tasks</code></td><td>タスク一覧（フィルタ: <code>status</code>, <code>assigned_to</code>, <code>due_date</code>, <code>customer_id</code>）</td></tr>
+          <tr><td><code>POST</code></td><td><code>/v1/tenant/crm/tasks</code></td><td>タスク作成</td></tr>
+          <tr><td><code>PATCH</code></td><td><code>/v1/tenant/crm/tasks/{task_id}</code></td><td>タスク更新（ステータス・タイトル・期限・優先度）</td></tr>
+          <tr><td><code>POST</code></td><td><code>/v1/tenant/crm/tasks/{task_id}/complete</code></td><td>タスク完了（副作用: タイムラインイベント）</td></tr>
+        </tbody>
+      </table>
+
+      <p>タスク作成時のリクエストボディ:</p>
+      <ul>
+        <li><code>customer_id</code>（必須）: 紐づけ先の顧客ID</li>
+        <li><code>title</code>（必須）: タスクタイトル</li>
+        <li><code>task_type</code>: タスク種別（<code>call</code>, <code>email</code>, <code>visit</code>, <code>follow_up</code>, <code>other</code>）</li>
+        <li><code>priority</code>: 優先度（<code>high</code>, <code>medium</code>, <code>low</code>）</li>
+        <li><code>due_date</code>: 期限日</li>
+        <li><code>description</code>: 詳細説明</li>
+      </ul>
+
+      <!-- ===== H2: 追客API ===== -->
+      <h2 id="follow-up-api">追客API</h2>
+      <p>追客APIは、顧客とのコミュニケーション記録を管理するエンドポイント群である。<b>通話記録</b>・<b>メール送信</b>・<b>LINE送信</b>の3チャネルに対応し、すべての操作は<b>タイムラインイベント</b>として記録される。</p>
+
+      <table>
+        <thead>
+          <tr><th>メソッド</th><th>エンドポイント</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/v1/tenant/crm/customers/{id}/communications</code></td><td>コミュニケーション記録一覧</td></tr>
+          <tr><td><code>POST</code></td><td><code>/v1/tenant/crm/customers/{id}/call-log</code></td><td>通話記録追加</td></tr>
+          <tr><td><code>POST</code></td><td><code>/v1/tenant/crm/customers/{id}/email</code></td><td>メール送信</td></tr>
+          <tr><td><code>POST</code></td><td><code>/v1/tenant/crm/customers/{id}/line</code></td><td>LINE送信</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="call-log">通話記録</h3>
+      <p>通話記録は営業担当者が手動で登録する。リクエストボディには以下を含む:</p>
+      <ul>
+        <li><code>direction</code>: 発信（<code>outbound</code>）/ 着信（<code>inbound</code>）</li>
+        <li><code>call_result</code>: 通話結果（<code>connected</code>, <code>no_answer</code>, <code>busy</code>, <code>voicemail</code>）</li>
+        <li><code>call_memo</code>: 通話メモ（任意）</li>
+        <li><code>call_duration_seconds</code>: 通話時間（秒、任意）</li>
+      </ul>
+
+      <h3 id="email-send">メール送信</h3>
+      <p>メール送信APIは<b>テンプレート対応</b>で、<code>template_id</code> を指定すると事前定義されたテンプレートに顧客情報を差し込んで送信する。テンプレート未指定時は <code>subject</code> と <code>body</code> をそのまま使用する。</p>
+
+      <h3 id="line-send">LINE送信</h3>
+      <p>LINE送信は<b>手動送信</b>のみ対応（Phase 4の設計範囲）。顧客の <code>line_id</code> が登録されている場合にのみ利用可能。自動メッセージ送信は将来拡張として検討する。</p>
+
+      <!-- ===== H2: 反響管理API ===== -->
+      <h2 id="inquiry-api">反響管理API</h2>
+      <p>反響管理APIは、不動産ポータルサイト（<b>SUUMO</b>、<b>HOME'S</b>等）からの反響メールを受信・パースし、CRMの顧客データに変換するためのエンドポイント群である。</p>
+
+      <table>
+        <thead>
+          <tr><th>メソッド</th><th>エンドポイント</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/v1/tenant/crm/inquiries</code></td><td>反響一覧（受信トレイ、フィルタ: <code>status</code>, <code>source</code>）</td></tr>
+          <tr><td><code>POST</code></td><td><code>/v1/tenant/crm/inquiries/{id}/link</code></td><td>反響→顧客紐づけ（<code>customer_id</code>省略時は新規顧客自動作成）</td></tr>
+          <tr><td><code>POST</code></td><td><code>/v1/tenant/crm/inquiries/{id}/ignore</code></td><td>反響無視</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="inquiry-webhook">メール転送Webhook</h3>
+      <p>反響メールの取込は<b>Webhook</b>経由で行う。不動産ポータルからの反響メールをメール転送サービス経由で受信し、自動的にパースして反響レコードを生成する。</p>
+
+      <table>
+        <thead>
+          <tr><th>項目</th><th>内容</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>エンドポイント</td><td><code>POST /v1/webhook/inquiry-email</code></td></tr>
+          <tr><td>認証</td><td><b>Webhook Secret</b>（セッション認証ではない）</td></tr>
+          <tr><td>リクエストボディ</td><td><code>{ raw_email: string, source: string }</code></td></tr>
+          <tr><td>レスポンス</td><td><code>{ inquiry_id: string }</code></td></tr>
+        </tbody>
+      </table>
+
+      <p>Webhookの詳細な設計（リトライポリシー、署名検証、メールパーサー仕様など）は<a href="crm-webhook-sekkei.html">Webhook設計詳細</a>を参照。</p>
+
+      <!-- ===== H2: 分析API ===== -->
+      <h2 id="analytics-api">分析API</h2>
+      <p>分析APIは、CRMに蓄積されたデータから<b>営業KPI</b>・<b>ファネル分析</b>・<b>リードタイム分析</b>・<b>月次レポート</b>を提供する読み取り専用のエンドポイント群である。</p>
+
+      <table>
+        <thead>
+          <tr><th>メソッド</th><th>エンドポイント</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/v1/tenant/crm/analytics/dashboard</code></td><td>ダッシュボードKPI</td></tr>
+          <tr><td><code>GET</code></td><td><code>/v1/tenant/crm/analytics/funnel</code></td><td>ファネルデータ</td></tr>
+          <tr><td><code>GET</code></td><td><code>/v1/tenant/crm/analytics/lead-time</code></td><td>リードタイム分析</td></tr>
+          <tr><td><code>GET</code></td><td><code>/v1/tenant/crm/analytics/monthly-report</code></td><td>月次レポート</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="dashboard-kpi">ダッシュボードKPI</h3>
+      <p>期間指定（<code>7d</code> / <code>30d</code> / <code>90d</code>）で以下のKPIを返却する:</p>
+      <ul>
+        <li><code>total_customers</code>: 総顧客数</li>
+        <li><code>new_inquiries</code>: 新規反響数</li>
+        <li><code>hearing_completion_rate</code>: ヒアリング完了率</li>
+        <li><code>visit_rate</code>: 来店率</li>
+        <li><code>contract_rate</code>: 成約率</li>
+        <li><code>avg_lead_time_days</code>: フェーズ別平均リードタイム</li>
+      </ul>
+
+      <h3 id="funnel-data">ファネルデータ</h3>
+      <p><code>compare_perheim=true</code> パラメータにより、<b>全体ファネル</b>と<b>Per Heim経由ファネル</b>のデュアルファネル比較が可能。Per Heimの効果測定に活用する。</p>
+
+      <h3 id="lead-time">リードタイム分析</h3>
+      <p>フェーズ間の平均遷移日数を返却する。各フェーズ遷移ペア（<code>from_phase</code> → <code>to_phase</code>）ごとの <code>avg_days</code> を配列で提供し、ボトルネックとなっているフェーズの特定に活用する。</p>
+
+      <h3 id="monthly-report">月次レポート</h3>
+      <p>指定月（<code>YYYYMM</code>形式）の包括的なレポートデータを返却する。ダッシュボードKPIの月次集計に加え、担当者別・店舗別の実績データを含む。</p>
+
+      <!-- ===== H2: カンバンAPI ===== -->
+      <h2 id="kanban-api">カンバンAPI</h2>
+      <p>カンバンAPIは、フロントエンドのカンバンボードUIに最適化されたエンドポイントを提供する。フェーズ別に顧客をグループ化し、ドラッグ&ドロップによるカード移動（= フェーズ遷移）をサポートする。</p>
+
+      <table>
+        <thead>
+          <tr><th>メソッド</th><th>エンドポイント</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/v1/tenant/crm/kanban</code></td><td>カンバンデータ取得（フェーズ別顧客グループ）</td></tr>
+          <tr><td><code>POST</code></td><td><code>/v1/tenant/crm/kanban/move</code></td><td>カード移動（= フェーズ遷移）</td></tr>
+        </tbody>
+      </table>
+
+      <p><b>カンバンデータ取得</b>は、各フェーズをカラムとして顧客サマリーを返却する:</p>
+      <ul>
+        <li><code>store_id</code>: 店舗でフィルタ（任意）</li>
+        <li><code>assigned_to</code>: 担当者でフィルタ（任意）</li>
+      </ul>
+
+      <p>レスポンスは <code>columns</code> 配列で、各カラムに <code>phase</code>（フェーズ名）、<code>customers</code>（顧客サマリー配列）、<code>count</code>（件数）を含む。</p>
+
+      <p><b>カード移動</b>（<code>POST /v1/tenant/crm/kanban/move</code>）は内部的に<b>顧客管理APIのフェーズ遷移</b>（<code>POST /v1/tenant/crm/customers/{id}/phase</code>）と同等の処理を実行する。カンバンUI専用のエンドポイントとして、<code>customer_id</code> と <code>to_phase</code> を直接受け取る簡易インターフェースを提供する。</p>
+
+      <!-- ===== Mermaid: リクエストフロー ===== -->
+      <h2 id="request-flow">リクエスト処理フロー</h2>
+      <p>すべてのCRM APIリクエストは以下の共通フローで処理される:</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+sequenceDiagram
+    participant Client as フロントエンド
+    participant Auth as 認証ミドルウェア
+    participant Router as CRM Router
+    participant Service as CRM Service
+    participant FS as Firestore
+    participant TL as タイムライン
+
+    Client->>Auth: リクエスト（セッションCookie）
+    Auth->>Auth: tenant_id / employee_id 解決
+    Auth->>Router: 認証済みリクエスト
+    Router->>Service: ビジネスロジック実行
+
+    alt 変更系操作
+        Service->>FS: データ更新
+        Service->>TL: タイムラインイベント生成
+        TL->>FS: イベント永続化
+    else 読み取り系操作
+        Service->>FS: データ取得
+    end
+
+    Service->>Router: レスポンス
+    Router->>Client: JSON レスポンス
+      </pre></div>
+
+      <p>認証ミドルウェアは既存の<b>セッションCookie認証基盤</b>を共有し、CRM APIでは追加で<b>3ロール権限マトリクス</b>（管理者 / マネージャー / 担当者）によるアクセス制御を実施する。</p>
+
+      <!-- ===== H2: セキュリティ・共通仕様 ===== -->
+      <h2 id="common-specs">セキュリティと共通仕様</h2>
+
+      <h3 id="pii-handling">PII取り扱い</h3>
+      <p>顧客の<b>電話番号</b>・<b>メールアドレス</b>はAPIでは平文で受け渡しするが、永続化時に以下の処理が行われる:</p>
+      <ul>
+        <li><b>暗号化列</b>への保存（AES-256-GCM）</li>
+        <li><b>検索用ハッシュ</b>（<code>phone_search_hash</code>, <code>email_search_hash</code>）の生成</li>
+        <li>重複検知は正規化後のハッシュを使用し、<b>平文一致検索は行わない</b></li>
+      </ul>
+
+      <h3 id="error-format">エラーレスポンス形式</h3>
+      <p>すべてのAPIは統一されたエラーレスポンス形式を返却する:</p>
+      <pre><code>{
+  "error": {
+    "code": "CUSTOMER_NOT_FOUND",
+    "message": "指定された顧客が見つかりません",
+    "details": {}
+  }
+}</code></pre>
+
+      <h3 id="pagination">ページネーション</h3>
+      <p>一覧系APIは共通のページネーションパラメータ（<code>page</code>, <code>limit</code>）を受け付け、レスポンスには <code>total</code>（総件数）と <code>page</code>（現在ページ）を含む。</p>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#api-prefix">APIプレフィックスとバージョニング</a></li>
+          <li><a href="#customer-api">顧客管理API</a></li>
+          <li class="toc-h3"><a href="#customer-crud">CRUD操作</a></li>
+          <li class="toc-h3"><a href="#customer-actions">ドメインアクション</a></li>
+          <li><a href="#task-api">タスク管理API</a></li>
+          <li><a href="#follow-up-api">追客API</a></li>
+          <li class="toc-h3"><a href="#call-log">通話記録</a></li>
+          <li class="toc-h3"><a href="#email-send">メール送信</a></li>
+          <li class="toc-h3"><a href="#line-send">LINE送信</a></li>
+          <li><a href="#inquiry-api">反響管理API</a></li>
+          <li class="toc-h3"><a href="#inquiry-webhook">メール転送Webhook</a></li>
+          <li><a href="#analytics-api">分析API</a></li>
+          <li class="toc-h3"><a href="#dashboard-kpi">ダッシュボードKPI</a></li>
+          <li class="toc-h3"><a href="#funnel-data">ファネルデータ</a></li>
+          <li class="toc-h3"><a href="#lead-time">リードタイム分析</a></li>
+          <li class="toc-h3"><a href="#monthly-report">月次レポート</a></li>
+          <li><a href="#kanban-api">カンバンAPI</a></li>
+          <li><a href="#request-flow">リクエスト処理フロー</a></li>
+          <li><a href="#common-specs">セキュリティと共通仕様</a></li>
+          <li class="toc-h3"><a href="#pii-handling">PII取り扱い</a></li>
+          <li class="toc-h3"><a href="#error-format">エラーレスポンス形式</a></li>
+          <li class="toc-h3"><a href="#pagination">ページネーション</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+          <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+          <li><a href="crm-webhook-sekkei.html">Webhook設計詳細</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+        <li><a href="crm-webhook-sekkei.html">Webhook設計詳細</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>
