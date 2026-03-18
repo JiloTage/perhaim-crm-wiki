@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>タスクリスト画面仕様 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; <a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a> &gt; タスクリスト画面仕様
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">タスクリスト画面仕様</h1>
+      <div class="article-meta">最終更新: 2026-03-19</div>
+      <div class="article-summary">Per Heim CRM v3.2 タスクリスト画面（<code>/crm/tasks</code>）のワイヤーフレームと詳細仕様。ヘッダーフィルタ、タスク行コンポーネント、タスク作成モーダル、ソート・フィルタ仕様、インタラクションフローを図解・HTMLモックアップ・Mermaidダイアグラムで視覚的に定義する。</div>
+
+      <p>
+        本記事はタスクリスト画面の<b>ワイヤーフレームと視覚仕様</b>を中心に記述する。
+        フロントエンド全体のアーキテクチャは<a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a>を、
+        バックエンドAPIの詳細は<a href="crm-api-sekkei.html">CRM API設計</a>を、
+        ダッシュボードのタスクウィジェットは<a href="gamen-dashboard.html">ダッシュボード画面仕様</a>を参照のこと。
+      </p>
+
+      <!-- ============================================================ -->
+      <h2 id="overall-layout">画面全体レイアウト</h2>
+      <!-- ============================================================ -->
+
+      <p>タスクリスト画面は上から順に、ヘッダー（タイトル+日付セレクタ+フィルタ群）、メインエリア（タスク行リスト）、フッター（完了済みタスク折りたたみ）の3セクションで構成される。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TB
+    subgraph Header["ヘッダー"]
+        direction LR
+        H1["📋 本日のタスク"]
+        H2["📅 日付セレクタ"]
+        H3["フィルタ: 担当者 | 顧客 | 優先度 | タイプ"]
+    end
+
+    subgraph Main["メインエリア — タスク行リスト"]
+        direction TB
+        T1["☐ 田中様に電話 — 田中太郎 — 17:00 — 🔴urgent — 📞follow_up"]
+        T2["☐ 山田様来店確認 — 山田花子 — 15:00 — 🟠high — 🏠visit"]
+        T3["☐ 鈴木様書類送付 — 鈴木一郎 — 18:00 — 🔵normal — 📄document"]
+        T4["☐ 佐藤様メモ更新 — 佐藤健一 — 明日 — ⚪low — ✋manual"]
+    end
+
+    subgraph Footer["完了済みタスク ▼ 折りたたみ"]
+        direction TB
+        D1["☑ 高橋様メール送付 — 完了 10:30"]
+        D2["☑ 伊藤様ヒアリングURL — 完了 09:15"]
+    end
+
+    Header --> Main --> Footer
+      </pre></div>
+
+      <h3 id="layout-wireframe">ワイヤーフレーム HTMLモックアップ</h3>
+
+      <!-- 画面全体ワイヤーフレーム -->
+      <div style="border: 2px solid #e0e0e0; border-radius: 8px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 780px;">
+
+        <!-- ヘッダー -->
+        <div style="background: #fafafa; padding: 16px 20px; border-bottom: 2px solid #e0e0e0;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 20px; font-weight: 700; color: #202122;">📋 本日のタスク</span>
+              <div style="display: flex; align-items: center; gap: 6px; background: white; border: 1px solid #c8ccd1; border-radius: 6px; padding: 6px 12px; font-size: 13px; color: #333;">
+                <span>📅</span>
+                <span>2026-03-19</span>
+                <span style="color: #999; cursor: pointer;">▼</span>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <button style="background: #1976d2; color: white; border: none; border-radius: 6px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;">＋ タスク作成</button>
+            </div>
+          </div>
+          <!-- フィルタ行 -->
+          <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
+            <select style="padding: 6px 10px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; background: white; color: #333;">
+              <option>担当者: 全員</option>
+            </select>
+            <select style="padding: 6px 10px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; background: white; color: #333;">
+              <option>顧客: すべて</option>
+            </select>
+            <select style="padding: 6px 10px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; background: white; color: #333;">
+              <option>優先度: すべて</option>
+            </select>
+            <select style="padding: 6px 10px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; background: white; color: #333;">
+              <option>タイプ: すべて</option>
+            </select>
+            <select style="padding: 6px 10px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; background: white; color: #333;">
+              <option>ステータス: 未完了</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- メインエリア: タスク行リスト -->
+        <!-- タスク1: urgent + 期限超過 -->
+        <div style="padding: 14px 20px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 14px; background: #fff5f5; cursor: pointer;">
+          <input type="checkbox" style="width: 20px; height: 20px; accent-color: #d32f2f; flex-shrink: 0;" disabled>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 600; font-size: 14px; color: #202122;">田中様に電話</div>
+            <div style="font-size: 12px; color: #666; margin-top: 3px;">
+              <a href="gamen-customer-card.html" style="color: #0645ad; text-decoration: none;">田中太郎</a>
+            </div>
+          </div>
+          <div style="font-size: 12px; color: #d32f2f; font-weight: 600; white-space: nowrap;">17:00 今日</div>
+          <span style="background: #d32f2f; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; white-space: nowrap;">urgent</span>
+          <span style="font-size: 16px; flex-shrink: 0;" title="follow_up">📞</span>
+        </div>
+
+        <!-- タスク2: high -->
+        <div style="padding: 14px 20px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 14px; cursor: pointer;">
+          <input type="checkbox" style="width: 20px; height: 20px; accent-color: #f57c00; flex-shrink: 0;" disabled>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 600; font-size: 14px; color: #202122;">山田様来店予約確認</div>
+            <div style="font-size: 12px; color: #666; margin-top: 3px;">
+              <a href="gamen-customer-card.html" style="color: #0645ad; text-decoration: none;">山田花子</a>
+            </div>
+          </div>
+          <div style="font-size: 12px; color: #f57c00; font-weight: 600; white-space: nowrap;">15:00 今日</div>
+          <span style="background: #f57c00; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; white-space: nowrap;">high</span>
+          <span style="font-size: 16px; flex-shrink: 0;" title="visit">🏠</span>
+        </div>
+
+        <!-- タスク3: normal -->
+        <div style="padding: 14px 20px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 14px; cursor: pointer;">
+          <input type="checkbox" style="width: 20px; height: 20px; flex-shrink: 0;" disabled>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 600; font-size: 14px; color: #202122;">鈴木様書類送付</div>
+            <div style="font-size: 12px; color: #666; margin-top: 3px;">
+              <a href="gamen-customer-card.html" style="color: #0645ad; text-decoration: none;">鈴木一郎</a>
+            </div>
+          </div>
+          <div style="font-size: 12px; color: #757575; font-weight: 600; white-space: nowrap;">18:00 今日</div>
+          <span style="background: #1976d2; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; white-space: nowrap;">normal</span>
+          <span style="font-size: 16px; flex-shrink: 0;" title="document">📄</span>
+        </div>
+
+        <!-- タスク4: low + 明日 -->
+        <div style="padding: 14px 20px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 14px; cursor: pointer;">
+          <input type="checkbox" style="width: 20px; height: 20px; flex-shrink: 0;" disabled>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 600; font-size: 14px; color: #202122;">佐藤様メモ更新</div>
+            <div style="font-size: 12px; color: #666; margin-top: 3px;">
+              <a href="gamen-customer-card.html" style="color: #0645ad; text-decoration: none;">佐藤健一</a>
+            </div>
+          </div>
+          <div style="font-size: 12px; color: #f57c00; font-weight: 600; white-space: nowrap;">明日 10:00</div>
+          <span style="background: #9e9e9e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; white-space: nowrap;">low</span>
+          <span style="font-size: 16px; flex-shrink: 0;" title="manual">✋</span>
+        </div>
+
+        <!-- 完了済み折りたたみセクション -->
+        <div style="background: #fafafa; padding: 12px 20px; border-top: 2px solid #e0e0e0; cursor: pointer;">
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #757575; font-weight: 600;">
+            <span>▶</span>
+            <span>完了済みタスク（2件）</span>
+          </div>
+        </div>
+
+        <!-- 展開時の完了済みタスク例（薄いグレー背景） -->
+        <div style="background: #f5f5f5; border-top: 1px solid #e8e8e8;">
+          <div style="padding: 12px 20px; border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 14px; opacity: 0.6;">
+            <input type="checkbox" checked style="width: 20px; height: 20px; accent-color: #388e3c; flex-shrink: 0;" disabled>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-weight: 500; font-size: 14px; text-decoration: line-through; color: #999;">高橋様メール送付</div>
+              <div style="font-size: 12px; color: #bbb; margin-top: 3px;">高橋美咲</div>
+            </div>
+            <div style="font-size: 12px; color: #bbb;">完了 10:30</div>
+            <span style="background: #bdbdbd; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">done</span>
+            <span style="font-size: 16px; flex-shrink: 0; opacity: 0.4;">📄</span>
+          </div>
+          <div style="padding: 12px 20px; display: flex; align-items: center; gap: 14px; opacity: 0.6;">
+            <input type="checkbox" checked style="width: 20px; height: 20px; accent-color: #388e3c; flex-shrink: 0;" disabled>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-weight: 500; font-size: 14px; text-decoration: line-through; color: #999;">伊藤様ヒアリングURL送付</div>
+              <div style="font-size: 12px; color: #bbb; margin-top: 3px;">伊藤次郎</div>
+            </div>
+            <div style="font-size: 12px; color: #bbb;">完了 09:15</div>
+            <span style="background: #bdbdbd; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">done</span>
+            <span style="font-size: 16px; flex-shrink: 0; opacity: 0.4;">📞</span>
+          </div>
+        </div>
+      </div>
+
+      <h3 id="layout-structure">レイアウト構成サマリ</h3>
+
+      <table>
+        <thead>
+          <tr><th>セクション</th><th>高さ目安</th><th>配置</th><th>データソース</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>ヘッダー</td><td>110px</td><td>全幅</td><td>セッション情報 + フィルタ状態</td></tr>
+          <tr><td>タスク行リスト</td><td>可変（1行 56px）</td><td>全幅リスト</td><td><code>GET /v1/tenant/crm/tasks</code></td></tr>
+          <tr><td>完了済み折りたたみ</td><td>可変</td><td>全幅</td><td><code>GET /v1/tenant/crm/tasks?status=completed</code></td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================================ -->
+      <h2 id="task-row">タスク行コンポーネント</h2>
+      <!-- ============================================================ -->
+
+      <p>各タスクは1行のコンポーネントとして表示される。チェックボックス、タイトル、顧客名リンク、期限表示、優先度バッジ、タスクタイプアイコンの6要素で構成される。</p>
+
+      <h3 id="task-row-detail">タスク行 拡大モックアップ</h3>
+
+      <!-- 拡大タスク行 -->
+      <div style="border: 2px solid #1976d2; border-radius: 10px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 780px;">
+        <div style="background: #e3f2fd; padding: 8px 16px; font-size: 12px; color: #1976d2; font-weight: 600;">タスク行コンポーネント構成</div>
+        <div style="padding: 20px 24px; display: flex; align-items: center; gap: 18px; background: white;">
+          <!-- 1. チェックボックス -->
+          <div style="text-align: center;">
+            <input type="checkbox" style="width: 24px; height: 24px;" disabled>
+            <div style="font-size: 10px; color: #999; margin-top: 4px;">即時完了</div>
+          </div>
+          <!-- 2. タイトル + 顧客名 -->
+          <div style="flex: 1; min-width: 0; border-left: 2px solid #e0e0e0; padding-left: 16px;">
+            <div style="font-weight: 700; font-size: 16px; color: #202122;">田中様に電話</div>
+            <div style="font-size: 13px; margin-top: 4px;">
+              <a href="gamen-customer-card.html" style="color: #0645ad; text-decoration: underline; cursor: pointer;">田中太郎</a>
+              <span style="color: #999; margin-left: 4px; font-size: 11px;">→ 顧客カードへ遷移</span>
+            </div>
+          </div>
+          <!-- 3. 期限表示 -->
+          <div style="text-align: center; border-left: 2px solid #e0e0e0; padding-left: 16px;">
+            <div style="font-size: 14px; font-weight: 700; color: #d32f2f;">17:00</div>
+            <div style="font-size: 11px; color: #d32f2f; font-weight: 600;">今日</div>
+          </div>
+          <!-- 4. 優先度バッジ -->
+          <div style="text-align: center; border-left: 2px solid #e0e0e0; padding-left: 16px;">
+            <span style="background: #d32f2f; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700;">urgent</span>
+          </div>
+          <!-- 5. タスクタイプアイコン -->
+          <div style="text-align: center; border-left: 2px solid #e0e0e0; padding-left: 16px;">
+            <span style="font-size: 24px;">📞</span>
+            <div style="font-size: 10px; color: #999; margin-top: 2px;">follow_up</div>
+          </div>
+        </div>
+      </div>
+
+      <h3 id="task-row-elements">要素仕様</h3>
+
+      <table>
+        <thead>
+          <tr><th>要素</th><th>説明</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>チェックボックス</b></td><td>24x24px。クリックで即時完了処理</td><td>POST /tasks/{id}/complete</td></tr>
+          <tr><td><b>タスクタイトル</b></td><td>太字16px。タスクの概要を1行で表示</td><td>-</td></tr>
+          <tr><td><b>顧客名リンク</b></td><td>青色リンクテキスト。紐づく顧客名を表示</td><td>クリック → <code>/crm/customers/:id</code></td></tr>
+          <tr><td><b>期限表示</b></td><td>時刻+日付。色で緊急度を表現</td><td>-</td></tr>
+          <tr><td><b>優先度バッジ</b></td><td>4段階のカラーバッジ</td><td>-</td></tr>
+          <tr><td><b>タスクタイプアイコン</b></td><td>絵文字アイコンでタイプを視覚化</td><td>-</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="task-row-priority">優先度バッジ仕様</h3>
+
+      <table>
+        <thead>
+          <tr><th>優先度</th><th>ラベル</th><th>背景色</th><th>表示</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>urgent</b></td>
+            <td>urgent</td>
+            <td><code>#d32f2f</code> 赤</td>
+            <td><span style="background: #d32f2f; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">urgent</span></td>
+          </tr>
+          <tr>
+            <td><b>high</b></td>
+            <td>high</td>
+            <td><code>#f57c00</code> オレンジ</td>
+            <td><span style="background: #f57c00; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">high</span></td>
+          </tr>
+          <tr>
+            <td><b>normal</b></td>
+            <td>normal</td>
+            <td><code>#1976d2</code> 青</td>
+            <td><span style="background: #1976d2; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">normal</span></td>
+          </tr>
+          <tr>
+            <td><b>low</b></td>
+            <td>low</td>
+            <td><code>#9e9e9e</code> グレー</td>
+            <td><span style="background: #9e9e9e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">low</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="task-row-type-icons">タスクタイプアイコン仕様</h3>
+
+      <table>
+        <thead>
+          <tr><th>タスクタイプ</th><th>アイコン</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>follow_up</code></td><td>📞</td><td>電話・メールなどのフォローアップ</td></tr>
+          <tr><td><code>document</code></td><td>📄</td><td>書類作成・送付</td></tr>
+          <tr><td><code>visit</code></td><td>🏠</td><td>来店対応・訪問</td></tr>
+          <tr><td><code>manual</code></td><td>✋</td><td>手動タスク（その他）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="task-row-due-colors">期限表示カラールール</h3>
+
+      <table>
+        <thead>
+          <tr><th>条件</th><th>文字色</th><th>カラーコード</th><th>表示例</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>期限超過 or 今日</td>
+            <td style="color: #d32f2f;">赤</td>
+            <td><code>#d32f2f</code></td>
+            <td><span style="color: #d32f2f; font-weight: 600;">17:00 今日</span></td>
+          </tr>
+          <tr>
+            <td>明日</td>
+            <td style="color: #f57c00;">オレンジ</td>
+            <td><code>#f57c00</code></td>
+            <td><span style="color: #f57c00; font-weight: 600;">明日 10:00</span></td>
+          </tr>
+          <tr>
+            <td>それ以降</td>
+            <td style="color: #757575;">グレー</td>
+            <td><code>#757575</code></td>
+            <td><span style="color: #757575; font-weight: 600;">03/22 14:00</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="task-row-states">タスク行の3状態</h3>
+
+      <p>タスク行は状態に応じて異なるスタイルで表示される。</p>
+
+      <!-- 状態1: 通常 -->
+      <div style="margin: 16px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 780px;">
+        <div style="font-size: 12px; font-weight: 600; color: #388e3c; margin-bottom: 6px;">状態1: 通常</div>
+        <div style="padding: 14px 20px; border: 1px solid #e0e0e0; border-radius: 6px; display: flex; align-items: center; gap: 14px; background: white;">
+          <input type="checkbox" style="width: 20px; height: 20px; flex-shrink: 0;" disabled>
+          <div style="flex: 1;"><div style="font-weight: 600; font-size: 14px;">鈴木様書類送付</div><div style="font-size: 12px; color: #666; margin-top: 3px;"><a href="#" style="color: #0645ad;">鈴木一郎</a></div></div>
+          <div style="font-size: 12px; color: #757575; font-weight: 600;">18:00 今日</div>
+          <span style="background: #1976d2; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">normal</span>
+          <span style="font-size: 16px;">📄</span>
+        </div>
+      </div>
+
+      <!-- 状態2: 期限超過 -->
+      <div style="margin: 16px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 780px;">
+        <div style="font-size: 12px; font-weight: 600; color: #d32f2f; margin-bottom: 6px;">状態2: 期限超過（背景薄赤）</div>
+        <div style="padding: 14px 20px; border: 1px solid #ffcdd2; border-radius: 6px; display: flex; align-items: center; gap: 14px; background: #fff5f5;">
+          <input type="checkbox" style="width: 20px; height: 20px; accent-color: #d32f2f; flex-shrink: 0;" disabled>
+          <div style="flex: 1;"><div style="font-weight: 600; font-size: 14px; color: #c62828;">田中様に電話</div><div style="font-size: 12px; color: #666; margin-top: 3px;"><a href="#" style="color: #0645ad;">田中太郎</a></div></div>
+          <div style="font-size: 12px; color: #d32f2f; font-weight: 700;">⚠ 期限超過</div>
+          <span style="background: #d32f2f; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">urgent</span>
+          <span style="font-size: 16px;">📞</span>
+        </div>
+      </div>
+
+      <!-- 状態3: 完了済み -->
+      <div style="margin: 16px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 780px;">
+        <div style="font-size: 12px; font-weight: 600; color: #757575; margin-bottom: 6px;">状態3: 完了済み（打ち消し線 + 薄グレー）</div>
+        <div style="padding: 14px 20px; border: 1px solid #e8e8e8; border-radius: 6px; display: flex; align-items: center; gap: 14px; background: #fafafa; opacity: 0.6;">
+          <input type="checkbox" checked style="width: 20px; height: 20px; accent-color: #388e3c; flex-shrink: 0;" disabled>
+          <div style="flex: 1;"><div style="font-weight: 500; font-size: 14px; text-decoration: line-through; color: #999;">高橋様メール送付</div><div style="font-size: 12px; color: #bbb; margin-top: 3px;">高橋美咲</div></div>
+          <div style="font-size: 12px; color: #bbb;">完了 10:30</div>
+          <span style="background: #bdbdbd; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">done</span>
+          <span style="font-size: 16px; opacity: 0.4;">📄</span>
+        </div>
+      </div>
+
+      <h3 id="task-row-state-spec">状態別スタイル仕様</h3>
+
+      <table>
+        <thead>
+          <tr><th>状態</th><th>背景色</th><th>テキスト装飾</th><th>透明度</th><th>条件</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>通常</b></td><td><code>#ffffff</code></td><td>なし</td><td>1.0</td><td><code>status !== "completed" && due_at > now</code></td></tr>
+          <tr><td><b>期限超過</b></td><td><code>#fff5f5</code></td><td>タイトル赤色</td><td>1.0</td><td><code>status !== "completed" && due_at <= now</code></td></tr>
+          <tr><td><b>完了済み</b></td><td><code>#fafafa</code></td><td>打ち消し線 + グレー</td><td>0.6</td><td><code>status === "completed"</code></td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================================ -->
+      <h2 id="create-modal">タスク作成モーダル</h2>
+      <!-- ============================================================ -->
+
+      <p>「＋ タスク作成」ボタンクリックで表示されるモーダルダイアログ。顧客選択からメモ入力まで、タスクに必要な全情報を入力する。</p>
+
+      <h3 id="create-modal-wireframe">タスク作成モーダル ワイヤーフレーム</h3>
+
+      <!-- HTMLモックアップ: タスク作成モーダル -->
+      <div style="margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 520px;">
+        <!-- オーバーレイ表現 -->
+        <div style="background: rgba(0,0,0,0.08); border-radius: 12px; padding: 4px;">
+          <div style="background: white; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.18); overflow: hidden;">
+            <!-- モーダルヘッダー -->
+            <div style="background: #fafafa; padding: 16px 24px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 16px; font-weight: 700; color: #202122;">新規タスク作成</span>
+              <span style="font-size: 20px; color: #999; cursor: pointer; line-height: 1;">&times;</span>
+            </div>
+
+            <!-- モーダルボディ -->
+            <div style="padding: 24px;">
+              <!-- 顧客選択 -->
+              <div style="margin-bottom: 20px;">
+                <label style="display: block; font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px;">顧客 <span style="color: #d32f2f;">*</span></label>
+                <div style="position: relative;">
+                  <input type="text" placeholder="顧客名を入力して検索..." style="width: 100%; padding: 10px 12px; border: 1px solid #c8ccd1; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                  <div style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #c8ccd1; border-top: none; border-radius: 0 0 6px 6px; font-size: 13px; display: none;">
+                    <!-- オートコンプリート候補 -->
+                  </div>
+                </div>
+                <div style="font-size: 11px; color: #999; margin-top: 4px;">オートコンプリートで顧客を検索</div>
+              </div>
+
+              <!-- タスクタイトル -->
+              <div style="margin-bottom: 20px;">
+                <label style="display: block; font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px;">タスクタイトル <span style="color: #d32f2f;">*</span></label>
+                <input type="text" placeholder="例: 田中様に電話" style="width: 100%; padding: 10px 12px; border: 1px solid #c8ccd1; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+              </div>
+
+              <!-- タスクタイプ -->
+              <div style="margin-bottom: 20px;">
+                <label style="display: block; font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px;">タスクタイプ <span style="color: #d32f2f;">*</span></label>
+                <select style="width: 100%; padding: 10px 12px; border: 1px solid #c8ccd1; border-radius: 6px; font-size: 14px; background: white; box-sizing: border-box;">
+                  <option value="">選択してください</option>
+                  <option value="follow_up">📞 フォローアップ</option>
+                  <option value="document">📄 書類対応</option>
+                  <option value="visit">🏠 来店・訪問</option>
+                  <option value="manual">✋ その他</option>
+                </select>
+              </div>
+
+              <!-- 優先度 -->
+              <div style="margin-bottom: 20px;">
+                <label style="display: block; font-size: 13px; font-weight: 600; color: #333; margin-bottom: 8px;">優先度 <span style="color: #d32f2f;">*</span></label>
+                <div style="display: flex; gap: 8px;">
+                  <label style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; border: 2px solid #ffcdd2; border-radius: 8px; background: #fff5f5; cursor: pointer; font-size: 13px; font-weight: 600; color: #d32f2f;">
+                    <input type="radio" name="priority-demo" value="urgent" style="accent-color: #d32f2f;" disabled> urgent
+                  </label>
+                  <label style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; border: 2px solid #ffe0b2; border-radius: 8px; background: #fff8e1; cursor: pointer; font-size: 13px; font-weight: 600; color: #f57c00;">
+                    <input type="radio" name="priority-demo" value="high" style="accent-color: #f57c00;" disabled> high
+                  </label>
+                  <label style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; border: 2px solid #bbdefb; border-radius: 8px; background: #e3f2fd; cursor: pointer; font-size: 13px; font-weight: 600; color: #1976d2;">
+                    <input type="radio" name="priority-demo" value="normal" checked style="accent-color: #1976d2;" disabled> normal
+                  </label>
+                  <label style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; border: 2px solid #e0e0e0; border-radius: 8px; background: #fafafa; cursor: pointer; font-size: 13px; font-weight: 600; color: #757575;">
+                    <input type="radio" name="priority-demo" value="low" style="accent-color: #9e9e9e;" disabled> low
+                  </label>
+                </div>
+              </div>
+
+              <!-- 期限日時 -->
+              <div style="margin-bottom: 20px;">
+                <label style="display: block; font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px;">期限日時 <span style="color: #d32f2f;">*</span></label>
+                <input type="datetime-local" value="2026-03-19T17:00" style="width: 100%; padding: 10px 12px; border: 1px solid #c8ccd1; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+              </div>
+
+              <!-- メモ -->
+              <div style="margin-bottom: 20px;">
+                <label style="display: block; font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px;">メモ</label>
+                <textarea placeholder="タスクに関するメモを入力..." rows="3" style="width: 100%; padding: 10px 12px; border: 1px solid #c8ccd1; border-radius: 6px; font-size: 14px; resize: vertical; font-family: inherit; box-sizing: border-box;"></textarea>
+              </div>
+            </div>
+
+            <!-- モーダルフッター -->
+            <div style="background: #fafafa; padding: 16px 24px; border-top: 1px solid #e0e0e0; display: flex; justify-content: flex-end; gap: 12px;">
+              <button style="background: white; color: #666; border: 1px solid #c8ccd1; border-radius: 6px; padding: 10px 24px; font-size: 14px; cursor: pointer;">キャンセル</button>
+              <button style="background: #1976d2; color: white; border: none; border-radius: 6px; padding: 10px 24px; font-size: 14px; font-weight: 600; cursor: pointer;">作成</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 id="create-modal-fields">フィールド仕様</h3>
+
+      <table>
+        <thead>
+          <tr><th>フィールド</th><th>タイプ</th><th>必須</th><th>バリデーション</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>顧客</b></td><td>オートコンプリート</td><td>必須</td><td>既存顧客IDが必要。2文字以上で候補表示</td></tr>
+          <tr><td><b>タスクタイトル</b></td><td>テキスト入力</td><td>必須</td><td>1〜100文字</td></tr>
+          <tr><td><b>タスクタイプ</b></td><td>ドロップダウン</td><td>必須</td><td>follow_up / document / visit / manual</td></tr>
+          <tr><td><b>優先度</b></td><td>ラジオボタン（4択）</td><td>必須</td><td>urgent / high / normal / low（デフォルト: normal）</td></tr>
+          <tr><td><b>期限日時</b></td><td>datetime-local</td><td>必須</td><td>現在時刻以降</td></tr>
+          <tr><td><b>メモ</b></td><td>テキストエリア</td><td>任意</td><td>最大1000文字</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="create-modal-api">API呼び出し</h3>
+
+      <pre><code>POST /v1/tenant/crm/tasks
+
+Request Body:
+{
+  "customer_id": "cust_123",
+  "title": "田中様に電話",
+  "task_type": "follow_up",
+  "priority": "urgent",
+  "due_at": "2026-03-19T17:00:00+09:00",
+  "note": "ヒアリング結果のフォローアップ"
+}
+
+Response: 201 Created
+{
+  "id": "task_010",
+  "customer_id": "cust_123",
+  "title": "田中様に電話",
+  "task_type": "follow_up",
+  "priority": "urgent",
+  "due_at": "2026-03-19T17:00:00+09:00",
+  "status": "pending",
+  "note": "ヒアリング結果のフォローアップ",
+  "created_at": "2026-03-19T14:00:00+09:00"
+}</code></pre>
+
+      <!-- ============================================================ -->
+      <h2 id="filter-sort">フィルタ・ソート仕様</h2>
+      <!-- ============================================================ -->
+
+      <p>タスクリスト上部に配置されるフィルタバーにより、表示対象を絞り込む。デフォルトソートは優先度降順→期限昇順→作成日時降順の3段階。</p>
+
+      <h3 id="filter-bar">フィルタバー ワイヤーフレーム</h3>
+
+      <!-- フィルタバーモックアップ -->
+      <div style="border: 2px solid #1976d2; border-radius: 10px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 780px;">
+        <div style="background: #e3f2fd; padding: 8px 16px; font-size: 12px; color: #1976d2; font-weight: 600;">フィルタバー構成</div>
+        <div style="padding: 16px 20px; background: #fafafa; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+          <!-- ステータス -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-size: 10px; color: #999; font-weight: 600;">ステータス</span>
+            <select style="padding: 8px 10px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; background: white;">
+              <option>すべて</option>
+              <option selected>未完了 (pending + in_progress)</option>
+              <option>完了 (completed)</option>
+            </select>
+          </div>
+          <!-- 担当者 -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-size: 10px; color: #999; font-weight: 600;">担当者</span>
+            <select style="padding: 8px 10px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; background: white;">
+              <option>全員</option>
+              <option>営業太郎</option>
+              <option>営業花子</option>
+            </select>
+          </div>
+          <!-- 顧客 -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-size: 10px; color: #999; font-weight: 600;">顧客</span>
+            <input type="text" placeholder="顧客名で絞込" style="padding: 8px 10px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; width: 120px;">
+          </div>
+          <!-- 優先度 -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-size: 10px; color: #999; font-weight: 600;">優先度</span>
+            <select style="padding: 8px 10px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; background: white;">
+              <option>すべて</option>
+              <option>urgent</option>
+              <option>high</option>
+              <option>normal</option>
+              <option>low</option>
+            </select>
+          </div>
+          <!-- タイプ -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-size: 10px; color: #999; font-weight: 600;">タイプ</span>
+            <select style="padding: 8px 10px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; background: white;">
+              <option>すべて</option>
+              <option>📞 follow_up</option>
+              <option>📄 document</option>
+              <option>🏠 visit</option>
+              <option>✋ manual</option>
+            </select>
+          </div>
+          <!-- リセットボタン -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-size: 10px; color: transparent;">-</span>
+            <button style="padding: 8px 12px; border: 1px solid #c8ccd1; border-radius: 4px; font-size: 12px; background: white; color: #999; cursor: pointer;">リセット</button>
+          </div>
+        </div>
+      </div>
+
+      <h3 id="sort-spec">ソート仕様</h3>
+
+      <p>デフォルトのソート順序（複合ソート）:</p>
+
+      <ol>
+        <li><b>優先度（降順）</b>: urgent → high → normal → low</li>
+        <li><b>期限（昇順）</b>: 近い期限が上位</li>
+        <li><b>作成日時（降順）</b>: 新しいタスクが上位</li>
+      </ol>
+
+      <pre><code>GET /v1/tenant/crm/tasks
+  ?status=pending,in_progress
+  &assignee_id=user_001
+  &customer_id=cust_123
+  &priority=urgent,high
+  &task_type=follow_up
+  &due_date=2026-03-19
+  &sort=priority_desc,due_at_asc,created_at_desc
+  &limit=50
+  &offset=0</code></pre>
+
+      <h3 id="filter-spec">フィルタ仕様一覧</h3>
+
+      <table>
+        <thead>
+          <tr><th>フィルタ名</th><th>パラメータ</th><th>値</th><th>デフォルト</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>ステータス</b></td><td><code>status</code></td><td>pending / in_progress / completed</td><td>pending, in_progress</td></tr>
+          <tr><td><b>担当者</b></td><td><code>assignee_id</code></td><td>ユーザーID</td><td>全員</td></tr>
+          <tr><td><b>顧客</b></td><td><code>customer_id</code></td><td>顧客ID</td><td>全顧客</td></tr>
+          <tr><td><b>優先度</b></td><td><code>priority</code></td><td>urgent / high / normal / low</td><td>すべて</td></tr>
+          <tr><td><b>タイプ</b></td><td><code>task_type</code></td><td>follow_up / document / visit / manual</td><td>すべて</td></tr>
+          <tr><td><b>期限日</b></td><td><code>due_date</code></td><td>YYYY-MM-DD</td><td>今日</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================================ -->
+      <h2 id="interaction">インタラクション仕様</h2>
+      <!-- ============================================================ -->
+
+      <p>タスク完了処理はチェックボックスクリックから始まる楽観的UI更新パターンを採用し、API通信の成否に応じてUIを確定またはロールバックする。</p>
+
+      <h3 id="interaction-complete-flow">タスク完了フロー</h3>
+
+      <div class="mermaid-container"><pre class="mermaid">
+sequenceDiagram
+    participant User as 営業担当
+    participant UI as TaskListView
+    participant API as CRM API
+    participant DB as Firestore
+
+    User->>UI: チェックボックスをクリック
+    UI->>UI: 楽観的UI更新<br/>（打ち消し線 + 薄グレー表示）
+    UI->>API: POST /v1/tenant/crm/tasks/{id}/complete
+    API->>DB: status = "completed"<br/>completed_at = now()
+
+    alt 成功
+        DB-->>API: 200 OK
+        API-->>UI: { status: "completed" }
+        UI->>UI: 完了セクションに移動<br/>（スライドアニメーション）
+    else 失敗
+        DB-->>API: 500 Error
+        API-->>UI: Error Response
+        UI->>UI: ロールバック<br/>（元のスタイルに戻す）
+        UI->>User: エラートースト表示<br/>「タスクの完了に失敗しました」
+    end
+      </pre></div>
+
+      <h3 id="interaction-complete-api">完了APIリクエスト</h3>
+
+      <pre><code>POST /v1/tenant/crm/tasks/{id}/complete
+
+Response: 200 OK
+{
+  "id": "task_001",
+  "status": "completed",
+  "completed_at": "2026-03-19T14:30:00+09:00",
+  "completed_by": "user_001"
+}</code></pre>
+
+      <h3 id="interaction-summary">操作一覧</h3>
+
+      <table>
+        <thead>
+          <tr><th>操作</th><th>トリガー</th><th>挙動</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>タスク完了</b></td>
+            <td>チェックボックスクリック</td>
+            <td>楽観的UI更新 → POST /tasks/{id}/complete → 成功: 完了セクションに移動 / 失敗: ロールバック</td>
+          </tr>
+          <tr>
+            <td><b>顧客カードへ遷移</b></td>
+            <td>顧客名リンククリック</td>
+            <td><code>/crm/customers/:customerId</code> へ画面遷移</td>
+          </tr>
+          <tr>
+            <td><b>タスク作成</b></td>
+            <td>「＋ タスク作成」ボタン</td>
+            <td>作成モーダル表示 → フォーム入力 → POST /tasks → リストに追加</td>
+          </tr>
+          <tr>
+            <td><b>フィルタ変更</b></td>
+            <td>フィルタドロップダウン変更</td>
+            <td>クエリパラメータ更新 → GET /tasks → リスト再描画</td>
+          </tr>
+          <tr>
+            <td><b>日付変更</b></td>
+            <td>日付セレクタ変更</td>
+            <td>due_date パラメータ更新 → GET /tasks → リスト再描画</td>
+          </tr>
+          <tr>
+            <td><b>完了済み展開/折りたたみ</b></td>
+            <td>完了済みセクションヘッダークリック</td>
+            <td>トグルアニメーションで展開/折りたたみ</td>
+          </tr>
+        </tbody>
+      </table>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#overall-layout">画面全体レイアウト</a></li>
+          <li class="toc-h3"><a href="#layout-wireframe">ワイヤーフレーム HTMLモックアップ</a></li>
+          <li class="toc-h3"><a href="#layout-structure">レイアウト構成サマリ</a></li>
+          <li><a href="#task-row">タスク行コンポーネント</a></li>
+          <li class="toc-h3"><a href="#task-row-detail">タスク行 拡大モックアップ</a></li>
+          <li class="toc-h3"><a href="#task-row-elements">要素仕様</a></li>
+          <li class="toc-h3"><a href="#task-row-priority">優先度バッジ仕様</a></li>
+          <li class="toc-h3"><a href="#task-row-type-icons">タスクタイプアイコン仕様</a></li>
+          <li class="toc-h3"><a href="#task-row-due-colors">期限表示カラールール</a></li>
+          <li class="toc-h3"><a href="#task-row-states">タスク行の3状態</a></li>
+          <li class="toc-h3"><a href="#task-row-state-spec">状態別スタイル仕様</a></li>
+          <li><a href="#create-modal">タスク作成モーダル</a></li>
+          <li class="toc-h3"><a href="#create-modal-wireframe">モーダル ワイヤーフレーム</a></li>
+          <li class="toc-h3"><a href="#create-modal-fields">フィールド仕様</a></li>
+          <li class="toc-h3"><a href="#create-modal-api">API呼び出し</a></li>
+          <li><a href="#filter-sort">フィルタ・ソート仕様</a></li>
+          <li class="toc-h3"><a href="#filter-bar">フィルタバー ワイヤーフレーム</a></li>
+          <li class="toc-h3"><a href="#sort-spec">ソート仕様</a></li>
+          <li class="toc-h3"><a href="#filter-spec">フィルタ仕様一覧</a></li>
+          <li><a href="#interaction">インタラクション仕様</a></li>
+          <li class="toc-h3"><a href="#interaction-complete-flow">タスク完了フロー</a></li>
+          <li class="toc-h3"><a href="#interaction-complete-api">完了APIリクエスト</a></li>
+          <li class="toc-h3"><a href="#interaction-summary">操作一覧</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+          <li><a href="gamen-dashboard.html">ダッシュボード画面仕様</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        <li><a href="gamen-dashboard.html">ダッシュボード画面仕様</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

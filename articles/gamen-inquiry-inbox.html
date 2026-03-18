@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>反響受信トレイ画面仕様 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; <a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a> &gt; 反響受信トレイ画面仕様
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">反響受信トレイ画面仕様</h1>
+      <div class="article-meta">最終更新: 2026-03-19</div>
+      <div class="article-summary">Per Heim CRM v3.2 反響受信トレイ画面（<code>/crm/inbox</code>）のワイヤーフレームと詳細仕様。メール受信トレイ風の2カラムレイアウトで反響一覧と詳細パネルを配置し、パース結果の確認・顧客登録・重複処理・自動処理結果の表示をワンストップで行う画面を定義する。</div>
+
+      <p>
+        本記事は反響受信トレイ画面の<b>ワイヤーフレームと視覚仕様</b>を中心に記述する。
+        フロントエンド全体のアーキテクチャは<a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a>を、
+        バックエンドAPIの詳細は<a href="crm-api-sekkei.html">CRM API設計</a>を、
+        外部連携（メール取込）の設計は<a href="crm-gaibu-renkei.html">CRM外部連携詳細</a>を、
+        Webhook仕様は<a href="crm-webhook-sekkei.html">Webhook設計詳細</a>を参照のこと。
+      </p>
+
+      <!-- ============================================================ -->
+      <h2 id="overall-layout">画面全体レイアウト</h2>
+      <!-- ============================================================ -->
+
+      <p>反響受信トレイ画面はメールクライアント風の2カラムレイアウトを採用する。左カラムに反響リスト、右カラムに選択した反響の詳細パネルを配置し、行クリックで右パネルの内容が切り替わる。</p>
+
+      <!-- HTMLワイヤーフレーム: 全体レイアウト -->
+      <div style="border: 2px solid #ccc; border-radius: 8px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #fafafa;">
+
+        <!-- ヘッダー -->
+        <div style="background: #1976d2; color: white; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-weight: 700; font-size: 16px;">反響受信トレイ</span>
+            <span style="background: #d32f2f; color: white; padding: 2px 10px; border-radius: 12px; font-size: 13px; font-weight: 600;">未処理 7</span>
+          </div>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <select style="padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.15); color: white; font-size: 13px;">
+              <option>全ソース</option>
+              <option>SUUMO</option>
+              <option>HOME'S</option>
+              <option>at home</option>
+              <option>手動</option>
+            </select>
+            <select style="padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.15); color: white; font-size: 13px;">
+              <option>全ステータス</option>
+              <option>new</option>
+              <option>auto_created</option>
+              <option>manual_review</option>
+              <option>duplicate</option>
+              <option>ignored</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 2カラムボディ -->
+        <div style="display: flex; min-height: 500px;">
+
+          <!-- 左: 反響リスト -->
+          <div style="width: 40%; border-right: 1px solid #e0e0e0; background: white; overflow-y: auto;">
+
+            <!-- 未読行1 -->
+            <div style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; border-left: 3px solid #1976d2; background: #f8f9ff; cursor: pointer;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="background: #ffebee; color: #d32f2f; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 700;">SUUMO</span>
+                <span style="font-weight: 700; font-size: 14px;">田中太郎</span>
+                <span style="margin-left: auto; font-size: 12px; color: #999;">5分前</span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #4caf50; flex-shrink: 0;" title="new"></span>
+              </div>
+              <div style="font-size: 12px; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">港区赤坂 2LDK マンション</div>
+            </div>
+
+            <!-- 未読行2 -->
+            <div style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; border-left: 3px solid #1976d2; background: #f8f9ff; cursor: pointer;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="background: #fff8e1; color: #f57f17; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 700;">HOME'S</span>
+                <span style="font-weight: 700; font-size: 14px;">山田花子</span>
+                <span style="margin-left: auto; font-size: 12px; color: #999;">1時間前</span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #4caf50; flex-shrink: 0;" title="new"></span>
+              </div>
+              <div style="font-size: 12px; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">渋谷区恵比寿 1K アパート</div>
+            </div>
+
+            <!-- 既読・自動処理済み行 -->
+            <div style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="background: #e3f2fd; color: #1976d2; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">at home</span>
+                <span style="font-weight: 400; font-size: 14px; color: #555;">佐藤健一</span>
+                <span style="margin-left: auto; font-size: 12px; color: #999;">3時間前</span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #2196f3; flex-shrink: 0;" title="auto_created"></span>
+              </div>
+              <div style="font-size: 12px; color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">新宿区西新宿 3LDK マンション</div>
+            </div>
+
+            <!-- 重複検知行 -->
+            <div style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="background: #ffebee; color: #d32f2f; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">SUUMO</span>
+                <span style="font-weight: 400; font-size: 14px; color: #555;">鈴木一郎</span>
+                <span style="margin-left: auto; font-size: 12px; color: #999;">昨日</span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #ff9800; flex-shrink: 0;" title="duplicate"></span>
+              </div>
+              <div style="font-size: 12px; color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">中央区銀座 1LDK</div>
+            </div>
+
+            <!-- 手動レビュー行 -->
+            <div style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="background: #f5f5f5; color: #757575; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">手動</span>
+                <span style="font-weight: 400; font-size: 14px; color: #555;">高橋美咲</span>
+                <span style="margin-left: auto; font-size: 12px; color: #999;">昨日</span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #fdd835; flex-shrink: 0;" title="manual_review"></span>
+              </div>
+              <div style="font-size: 12px; color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">（物件名なし）</div>
+            </div>
+
+          </div>
+
+          <!-- 右: 詳細パネル -->
+          <div style="width: 60%; background: white; padding: 20px; overflow-y: auto;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+              <span style="background: #ffebee; color: #d32f2f; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;">SUUMO</span>
+              <span style="font-size: 20px; font-weight: 700;">田中太郎</span>
+              <span style="width: 10px; height: 10px; border-radius: 50%; background: #4caf50;" title="new"></span>
+              <span style="font-size: 13px; color: #999;">5分前に受信</span>
+            </div>
+
+            <!-- パース結果 -->
+            <div style="background: #f5f5f5; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="font-weight: 600; margin-bottom: 12px; font-size: 14px; color: #333;">パース結果</div>
+              <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+                <tr><td style="padding: 4px 8px; color: #666; width: 100px;">顧客名</td><td style="padding: 4px 8px; font-weight: 500;">田中太郎</td></tr>
+                <tr><td style="padding: 4px 8px; color: #666;">電話番号</td><td style="padding: 4px 8px;">090-1234-5678</td></tr>
+                <tr><td style="padding: 4px 8px; color: #666;">メール</td><td style="padding: 4px 8px;">tanaka@example.com</td></tr>
+                <tr><td style="padding: 4px 8px; color: #666;">問い合わせ物件</td><td style="padding: 4px 8px;">港区赤坂 2LDK マンション（築5年）</td></tr>
+                <tr><td style="padding: 4px 8px; color: #666;">メッセージ</td><td style="padding: 4px 8px;">内見を希望します。週末の午前中が都合がよいです。</td></tr>
+              </table>
+            </div>
+
+            <!-- 原文メール -->
+            <details style="margin-bottom: 16px; border: 1px solid #e0e0e0; border-radius: 8px;">
+              <summary style="padding: 12px 16px; cursor: pointer; font-weight: 500; font-size: 14px; background: #fafafa; border-radius: 8px;">原文メールを表示</summary>
+              <div style="padding: 12px 16px; font-size: 13px; color: #555; background: #fefefe; white-space: pre-wrap; font-family: monospace; line-height: 1.6;">Subject: 【SUUMO】物件お問い合わせ
+From: suumo-notification@suumo.jp
+
+お問い合わせがありました。
+━━━━━━━━━━━━━━━
+物件名: 港区赤坂 2LDK マンション（築5年）
+お名前: 田中太郎
+電話番号: 090-1234-5678
+メール: tanaka@example.com
+お問い合わせ内容:
+内見を希望します。週末の午前中が都合がよいです。
+━━━━━━━━━━━━━━━</div>
+            </details>
+
+            <!-- アクションボタン群 -->
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button style="padding: 8px 16px; background: #1976d2; color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;">新規顧客として登録</button>
+              <button style="padding: 8px 16px; background: #fff; color: #1976d2; border: 1px solid #1976d2; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;">既存顧客に紐づけ</button>
+              <button style="padding: 8px 16px; background: #fff; color: #f57c00; border: 1px solid #f57c00; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;">手動レビュー</button>
+              <button style="padding: 8px 16px; background: #fff; color: #757575; border: 1px solid #bdbdbd; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;">無視</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <p><b>画面構成サマリ</b>:</p>
+      <table>
+        <thead>
+          <tr><th>領域</th><th>幅比率</th><th>役割</th><th>データソース</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>ヘッダーバー</td><td>全幅</td><td>タイトル + 未処理バッジ + フィルタ</td><td>集計API</td></tr>
+          <tr><td>反響リスト（左）</td><td>40%</td><td>メール受信トレイ風の反響一覧</td><td><code>GET /v1/tenant/crm/inquiries</code></td></tr>
+          <tr><td>詳細パネル（右）</td><td>60%</td><td>パース結果 + 原文 + アクション</td><td><code>GET /v1/tenant/crm/inquiries/:id</code></td></tr>
+        </tbody>
+      </table>
+
+      <p>画面構成のMermaidダイアグラム:</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TB
+    subgraph Header["ヘッダー"]
+        H1["反響受信トレイ"]
+        H2["未処理 7"]
+        H3["ソースフィルタ ▼"]
+        H4["ステータスフィルタ ▼"]
+    end
+
+    subgraph Body["2カラムボディ"]
+        direction LR
+        subgraph Left["左: 反響リスト (40%)"]
+            L1["🔴 SUUMO 田中太郎 5分前 ●new"]
+            L2["🟡 HOME'S 山田花子 1h前 ●new"]
+            L3["🔵 at home 佐藤健一 3h前 ●auto"]
+            L4["🔴 SUUMO 鈴木一郎 昨日 ●dup"]
+            L5["⚪ 手動 高橋美咲 昨日 ●review"]
+        end
+        subgraph Right["右: 詳細パネル (60%)"]
+            R1["パース結果: 氏名/電話/メール/物件"]
+            R2["原文メール（折りたたみ）"]
+            R3["重複候補リスト"]
+            R4["アクションボタン群"]
+        end
+    end
+
+    Header --> Body
+    L1 --> |"クリック"| Right
+      </pre></div>
+
+      <!-- ============================================================ -->
+      <h2 id="inquiry-row">反響リスト行</h2>
+      <!-- ============================================================ -->
+
+      <p>左カラムの各行は、メール受信トレイの行と同様の情報密度で反響の概要を表示する。未読/既読の視覚的区別により、処理の優先度を直感的に把握できる。</p>
+
+      <h3 id="row-wireframe">反響行 拡大ワイヤーフレーム</h3>
+
+      <!-- 未読行 拡大モック -->
+      <div style="margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+        <div style="font-size: 12px; color: #999; margin-bottom: 8px; font-weight: 600;">未読状態（NEW）</div>
+        <div style="padding: 16px 20px; border: 2px solid #e0e0e0; border-left: 4px solid #1976d2; background: #f8f9ff; border-radius: 6px; cursor: pointer;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+            <span style="background: #ffebee; color: #d32f2f; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 700;">SUUMO</span>
+            <span style="font-weight: 700; font-size: 15px; color: #212121;">田中太郎</span>
+            <span style="font-size: 13px; color: #666; margin-left: 4px;">港区赤坂 2LDK マンション</span>
+            <span style="margin-left: auto; font-size: 12px; color: #999;">5分前</span>
+            <span style="width: 10px; height: 10px; border-radius: 50%; background: #4caf50; flex-shrink: 0;" title="new"></span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 16px; font-size: 12px; color: #888;">
+            <span>090-1234-5678</span>
+            <span>tanaka@example.com</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 既読行 拡大モック -->
+      <div style="margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+        <div style="font-size: 12px; color: #999; margin-bottom: 8px; font-weight: 600;">既読状態（auto_created）</div>
+        <div style="padding: 16px 20px; border: 1px solid #e0e0e0; background: #fff; border-radius: 6px; cursor: pointer;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+            <span style="background: #e3f2fd; color: #1976d2; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 600;">at home</span>
+            <span style="font-weight: 400; font-size: 15px; color: #555;">佐藤健一</span>
+            <span style="font-size: 13px; color: #999; margin-left: 4px;">新宿区西新宿 3LDK マンション</span>
+            <span style="margin-left: auto; font-size: 12px; color: #bbb;">3時間前</span>
+            <span style="width: 10px; height: 10px; border-radius: 50%; background: #2196f3; flex-shrink: 0;" title="auto_created"></span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 16px; font-size: 12px; color: #bbb;">
+            <span>080-9876-5432</span>
+            <span>sato@example.com</span>
+          </div>
+        </div>
+      </div>
+
+      <h3 id="row-source-badges">ソースバッジ</h3>
+
+      <table>
+        <thead>
+          <tr><th>ソース</th><th>バッジ</th><th>背景色</th><th>文字色</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>SUUMO</b></td>
+            <td><span style="background: #ffebee; color: #d32f2f; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;">SUUMO</span></td>
+            <td><code>#ffebee</code></td>
+            <td><code>#d32f2f</code></td>
+          </tr>
+          <tr>
+            <td><b>HOME'S</b></td>
+            <td><span style="background: #fff8e1; color: #f57f17; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;">HOME'S</span></td>
+            <td><code>#fff8e1</code></td>
+            <td><code>#f57f17</code></td>
+          </tr>
+          <tr>
+            <td><b>at home</b></td>
+            <td><span style="background: #e3f2fd; color: #1976d2; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;">at home</span></td>
+            <td><code>#e3f2fd</code></td>
+            <td><code>#1976d2</code></td>
+          </tr>
+          <tr>
+            <td><b>手動</b></td>
+            <td><span style="background: #f5f5f5; color: #757575; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">手動</span></td>
+            <td><code>#f5f5f5</code></td>
+            <td><code>#757575</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="row-status-dots">ステータスドット</h3>
+
+      <table>
+        <thead>
+          <tr><th>ステータス</th><th>ドット色</th><th>カラーコード</th><th>意味</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>new</b></td>
+            <td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#4caf50;vertical-align:middle;"></span> 緑</td>
+            <td><code>#4caf50</code></td>
+            <td>未処理の新着反響</td>
+          </tr>
+          <tr>
+            <td><b>auto_created</b></td>
+            <td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#2196f3;vertical-align:middle;"></span> 青</td>
+            <td><code>#2196f3</code></td>
+            <td>自動で顧客レコード作成済み</td>
+          </tr>
+          <tr>
+            <td><b>manual_review</b></td>
+            <td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#fdd835;vertical-align:middle;"></span> 黄</td>
+            <td><code>#fdd835</code></td>
+            <td>手動レビューが必要</td>
+          </tr>
+          <tr>
+            <td><b>duplicate</b></td>
+            <td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ff9800;vertical-align:middle;"></span> オレンジ</td>
+            <td><code>#ff9800</code></td>
+            <td>重複検知済み</td>
+          </tr>
+          <tr>
+            <td><b>ignored</b></td>
+            <td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#9e9e9e;vertical-align:middle;"></span> グレー</td>
+            <td><code>#9e9e9e</code></td>
+            <td>無視済み</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="row-unread-read">未読/既読の視覚的区別</h3>
+
+      <table>
+        <thead>
+          <tr><th>状態</th><th>左ボーダー</th><th>背景色</th><th>フォントウェイト</th><th>文字色</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>未読</b></td>
+            <td>3px solid <code>#1976d2</code>（青）</td>
+            <td><code>#f8f9ff</code>（薄青）</td>
+            <td><code>font-weight: 700</code>（太字）</td>
+            <td><code>#212121</code>（濃い黒）</td>
+          </tr>
+          <tr>
+            <td><b>既読</b></td>
+            <td>なし</td>
+            <td><code>#ffffff</code>（白）</td>
+            <td><code>font-weight: 400</code>（通常）</td>
+            <td><code>#555555</code>（グレー）</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================================ -->
+      <h2 id="detail-panel">反響詳細パネル</h2>
+      <!-- ============================================================ -->
+
+      <p>右カラムの詳細パネルは、左リストで選択した反響のパース結果・原文・重複候補・アクションボタンを一画面に集約する。</p>
+
+      <h3 id="detail-wireframe">詳細パネル ワイヤーフレーム</h3>
+
+      <!-- HTMLモックアップ: 詳細パネル全体 -->
+      <div style="border: 2px solid #e0e0e0; border-radius: 8px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px;">
+
+        <!-- ヘッダー -->
+        <div style="padding: 16px 20px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 10px;">
+          <span style="background: #ffebee; color: #d32f2f; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 700;">SUUMO</span>
+          <span style="font-size: 20px; font-weight: 700;">田中太郎</span>
+          <span style="width: 10px; height: 10px; border-radius: 50%; background: #4caf50;"></span>
+          <span style="font-size: 13px; color: #999; margin-left: auto;">2026-03-19 14:55 受信</span>
+        </div>
+
+        <!-- パース結果セクション -->
+        <div style="padding: 16px 20px; border-bottom: 1px solid #f0f0f0;">
+          <div style="font-weight: 600; font-size: 14px; color: #333; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+            <span style="width: 4px; height: 16px; background: #1976d2; border-radius: 2px; display: inline-block;"></span>
+            パース結果
+          </div>
+          <div style="display: grid; grid-template-columns: 100px 1fr; gap: 8px 12px; font-size: 13px;">
+            <span style="color: #888;">顧客名</span><span style="font-weight: 600;">田中太郎</span>
+            <span style="color: #888;">電話番号</span><span>090-1234-5678</span>
+            <span style="color: #888;">メール</span><span>tanaka@example.com</span>
+            <span style="color: #888;">問い合わせ物件</span><span>港区赤坂 2LDK マンション（築5年）</span>
+            <span style="color: #888;">メッセージ</span><span style="line-height: 1.5;">内見を希望します。週末の午前中が都合がよいです。</span>
+          </div>
+        </div>
+
+        <!-- 原文メール（折りたたみ） -->
+        <div style="padding: 0 20px; border-bottom: 1px solid #f0f0f0;">
+          <details>
+            <summary style="padding: 12px 0; cursor: pointer; font-weight: 500; font-size: 14px; color: #555;">原文メールを表示</summary>
+            <div style="padding: 0 0 12px; font-size: 12px; color: #777; font-family: monospace; white-space: pre-wrap; line-height: 1.6; background: #f9f9f9; padding: 12px; border-radius: 4px; margin-bottom: 12px;">Subject: 【SUUMO】物件お問い合わせ
+From: suumo-notification@suumo.jp
+Date: 2026-03-19 14:55:00
+
+物件名: 港区赤坂 2LDK マンション（築5年）
+お名前: 田中太郎
+電話番号: 090-1234-5678
+メール: tanaka@example.com
+お問い合わせ内容:
+内見を希望します。週末の午前中が都合がよいです。</div>
+          </details>
+        </div>
+
+        <!-- 重複候補セクション -->
+        <div style="padding: 16px 20px; border-bottom: 1px solid #f0f0f0;">
+          <div style="font-weight: 600; font-size: 14px; color: #333; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+            <span style="width: 4px; height: 16px; background: #ff9800; border-radius: 2px; display: inline-block;"></span>
+            重複候補
+            <span style="background: #fff3e0; color: #e65100; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-left: 4px;">1件</span>
+          </div>
+          <div style="border: 1px solid #ffe0b2; border-radius: 6px; padding: 12px; background: #fff8e1;">
+            <div style="display: flex; align-items: center; gap: 12px; font-size: 13px;">
+              <div style="width: 36px; height: 36px; border-radius: 50%; background: #e0e0e0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: #666;">田</div>
+              <div style="flex: 1;">
+                <div style="font-weight: 600;">田中太郎 <span style="font-weight: 400; color: #999; font-size: 12px;">（既存顧客）</span></div>
+                <div style="font-size: 12px; color: #888; margin-top: 2px;">電話ハッシュ一致 / 名前一致</div>
+              </div>
+              <div style="text-align: right; font-size: 12px;">
+                <div style="color: #e65100; font-weight: 600;">一致度: 95%</div>
+                <div style="color: #999;">Phase: hearing_active</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- アクションボタン群 -->
+        <div style="padding: 16px 20px; display: flex; gap: 8px; flex-wrap: wrap;">
+          <button style="padding: 10px 20px; background: #1976d2; color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; flex: 1; min-width: 140px;">新規顧客として登録</button>
+          <button style="padding: 10px 20px; background: #fff; color: #1976d2; border: 2px solid #1976d2; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; flex: 1; min-width: 140px;">既存顧客に紐づけ</button>
+          <button style="padding: 10px 20px; background: #fff; color: #f57c00; border: 1px solid #f57c00; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;">手動レビュー</button>
+          <button style="padding: 10px 20px; background: #fff; color: #757575; border: 1px solid #bdbdbd; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;">無視</button>
+        </div>
+      </div>
+
+      <h3 id="detail-actions">アクションボタン仕様</h3>
+
+      <table>
+        <thead>
+          <tr><th>ボタン</th><th>API呼び出し</th><th>結果</th><th>スタイル</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>新規顧客として登録</b></td>
+            <td><code>POST /v1/tenant/crm/inquiries/:id/create-customer</code></td>
+            <td>パース結果からcustomerレコードを自動作成。担当者をラウンドロビンで割当</td>
+            <td>Primary（青ボタン）</td>
+          </tr>
+          <tr>
+            <td><b>既存顧客に紐づけ</b></td>
+            <td><code>POST /v1/tenant/crm/inquiries/:id/link-customer</code></td>
+            <td>顧客選択ダイアログを表示。選択後にinquiryをcustomerに紐づけ</td>
+            <td>Secondary（青枠ボタン）</td>
+          </tr>
+          <tr>
+            <td><b>手動レビュー</b></td>
+            <td><code>PATCH /v1/tenant/crm/inquiries/:id</code> <code>{status: "manual_review"}</code></td>
+            <td>ステータスをmanual_reviewに変更。担当者に通知を送信</td>
+            <td>Warning（オレンジ枠ボタン）</td>
+          </tr>
+          <tr>
+            <td><b>無視</b></td>
+            <td><code>PATCH /v1/tenant/crm/inquiries/:id</code> <code>{status: "ignored"}</code></td>
+            <td>ステータスをignoredに変更。リストでグレー表示</td>
+            <td>Neutral（グレー枠ボタン）</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="detail-duplicate">重複候補セクション仕様</h3>
+
+      <p>重複検知は以下の条件で既存顧客との一致を判定する:</p>
+
+      <table>
+        <thead>
+          <tr><th>一致条件</th><th>重み</th><th>判定方法</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>電話番号ハッシュ一致</td><td>50%</td><td>SHA-256ハッシュ比較（PII暗号化対応）</td></tr>
+          <tr><td>メールアドレス一致</td><td>30%</td><td>正規化後の完全一致</td></tr>
+          <tr><td>氏名一致</td><td>20%</td><td>姓名の完全一致 or レーベンシュタイン距離 &le; 2</td></tr>
+        </tbody>
+      </table>
+
+      <p>一致度が <b>70%以上</b> の場合に重複候補として表示する。90%以上の場合はステータスを自動で <code>duplicate</code> に設定する。</p>
+
+      <!-- ============================================================ -->
+      <h2 id="processing-flow">反響処理フロー</h2>
+      <!-- ============================================================ -->
+
+      <p>反響は受信後、自動処理または手動操作によって以下の状態遷移を経る。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TD
+    NEW["🟢 new\n新着反響"]
+
+    NEW --> |"自動処理成功\n（パース成功 + 重複なし）"| AUTO["🔵 auto_created\n顧客レコード自動作成"]
+    NEW --> |"パース失敗 / 曖昧なデータ"| REVIEW["🟡 manual_review\n手動レビュー要"]
+    NEW --> |"重複検知\n（一致度 ≥ 90%）"| DUP["🟠 duplicate\n重複検知"]
+
+    REVIEW --> |"「新規顧客として登録」"| CREATED["✅ 顧客レコード作成"]
+    REVIEW --> |"「既存顧客に紐づけ」"| LINKED["✅ 既存顧客に紐づけ"]
+    REVIEW --> |"「無視」"| IGNORED["⚫ ignored\n無視済み"]
+
+    DUP --> |"「既存顧客に紐づけ」\n（マージ）"| LINKED
+    DUP --> |"「新規顧客として登録」\n（別人として登録）"| CREATED
+
+    AUTO --> |"担当者割当\n（ラウンドロビン）"| ASSIGNED["👤 担当者割当済み"]
+    CREATED --> ASSIGNED
+    LINKED --> ASSIGNED
+
+    ASSIGNED --> |"サンクスメール送信"| DONE["📧 初回対応完了"]
+
+    style NEW fill:#e8f5e9,stroke:#4caf50
+    style AUTO fill:#e3f2fd,stroke:#2196f3
+    style REVIEW fill:#fff8e1,stroke:#fdd835
+    style DUP fill:#fff3e0,stroke:#ff9800
+    style IGNORED fill:#f5f5f5,stroke:#9e9e9e
+    style CREATED fill:#e8f5e9,stroke:#4caf50
+    style LINKED fill:#e8f5e9,stroke:#4caf50
+    style ASSIGNED fill:#e3f2fd,stroke:#1976d2
+    style DONE fill:#e8f5e9,stroke:#388e3c
+      </pre></div>
+
+      <h3 id="processing-auto-rules">自動処理判定ルール</h3>
+
+      <table>
+        <thead>
+          <tr><th>条件</th><th>判定</th><th>結果ステータス</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>パース成功 AND 重複なし AND 必須項目（名前+連絡先）あり</td><td>自動処理</td><td><code>auto_created</code></td></tr>
+          <tr><td>パース失敗 OR 必須項目欠落</td><td>手動レビュー</td><td><code>manual_review</code></td></tr>
+          <tr><td>重複一致度 &ge; 90%</td><td>重複フラグ</td><td><code>duplicate</code></td></tr>
+          <tr><td>重複一致度 70-89%</td><td>手動確認（重複候補表示）</td><td><code>new</code>（候補あり表示）</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================================ -->
+      <h2 id="auto-processed">自動処理結果表示</h2>
+      <!-- ============================================================ -->
+
+      <p>自動処理が成功した反響（<code>auto_created</code>）を選択すると、詳細パネルに処理結果のサマリバナーが表示される。</p>
+
+      <h3 id="auto-wireframe">自動処理済み表示 ワイヤーフレーム</h3>
+
+      <!-- HTMLモックアップ: 自動処理済みパネル -->
+      <div style="border: 2px solid #e0e0e0; border-radius: 8px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px;">
+
+        <!-- ヘッダー -->
+        <div style="padding: 16px 20px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 10px;">
+          <span style="background: #e3f2fd; color: #1976d2; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 700;">at home</span>
+          <span style="font-size: 20px; font-weight: 700;">佐藤健一</span>
+          <span style="width: 10px; height: 10px; border-radius: 50%; background: #2196f3;"></span>
+          <span style="font-size: 13px; color: #999; margin-left: auto;">3時間前</span>
+        </div>
+
+        <!-- 自動処理済みバナー -->
+        <div style="margin: 16px 20px; padding: 14px 16px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border: 1px solid #a5d6a7; border-radius: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span style="font-size: 18px;">&#10003;</span>
+            <span style="font-weight: 700; font-size: 14px; color: #2e7d32;">自動処理済み</span>
+          </div>
+          <div style="font-size: 13px; color: #333; line-height: 1.8;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: #666; width: 120px;">顧客レコード:</span>
+              <a href="#" style="color: #1976d2; text-decoration: none; font-weight: 500;">佐藤健一</a>
+              <span style="font-size: 11px; color: #999;">（cust_456）</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: #666; width: 120px;">担当者割当:</span>
+              <span style="font-weight: 500;">営業次郎</span>
+              <span style="font-size: 11px; background: #e3f2fd; color: #1976d2; padding: 1px 6px; border-radius: 3px;">ラウンドロビン</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: #666; width: 120px;">サンクスメール:</span>
+              <span style="font-weight: 500; color: #2e7d32;">送信済み</span>
+              <span style="font-size: 11px; color: #999;">2026-03-19 12:02</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- パース結果（省略表示） -->
+        <div style="padding: 0 20px 16px;">
+          <div style="font-weight: 600; font-size: 14px; color: #333; margin-bottom: 8px;">パース結果</div>
+          <div style="display: grid; grid-template-columns: 100px 1fr; gap: 4px 12px; font-size: 13px; color: #666;">
+            <span>顧客名</span><span>佐藤健一</span>
+            <span>電話番号</span><span>080-9876-5432</span>
+            <span>メール</span><span>sato@example.com</span>
+            <span>物件</span><span>新宿区西新宿 3LDK マンション</span>
+          </div>
+        </div>
+
+      </div>
+
+      <h3 id="auto-banner-spec">自動処理バナー仕様</h3>
+
+      <table>
+        <thead>
+          <tr><th>表示項目</th><th>内容</th><th>リンク</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>顧客レコード</td><td>作成された顧客名 + ID</td><td><code>/crm/customers/:id</code> へリンク</td></tr>
+          <tr><td>担当者割当</td><td>割り当てられた担当者名 + 割当方法</td><td>-</td></tr>
+          <tr><td>サンクスメール</td><td>送信ステータス + 送信日時</td><td>-</td></tr>
+        </tbody>
+      </table>
+
+      <p>担当者割当のラウンドロビンは以下のロジックで決定される:</p>
+      <ol>
+        <li>テナントの営業担当者一覧を取得</li>
+        <li>各担当者の現在アクティブ顧客数をカウント</li>
+        <li>最もアクティブ顧客数が少ない担当者に割当</li>
+        <li>同数の場合は前回割当からの経過時間が長い担当者を優先</li>
+      </ol>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#overall-layout">画面全体レイアウト</a></li>
+          <li><a href="#inquiry-row">反響リスト行</a></li>
+          <li class="toc-h3"><a href="#row-wireframe">反響行 拡大ワイヤーフレーム</a></li>
+          <li class="toc-h3"><a href="#row-source-badges">ソースバッジ</a></li>
+          <li class="toc-h3"><a href="#row-status-dots">ステータスドット</a></li>
+          <li class="toc-h3"><a href="#row-unread-read">未読/既読の視覚的区別</a></li>
+          <li><a href="#detail-panel">反響詳細パネル</a></li>
+          <li class="toc-h3"><a href="#detail-wireframe">詳細パネル ワイヤーフレーム</a></li>
+          <li class="toc-h3"><a href="#detail-actions">アクションボタン仕様</a></li>
+          <li class="toc-h3"><a href="#detail-duplicate">重複候補セクション仕様</a></li>
+          <li><a href="#processing-flow">反響処理フロー</a></li>
+          <li class="toc-h3"><a href="#processing-auto-rules">自動処理判定ルール</a></li>
+          <li><a href="#auto-processed">自動処理結果表示</a></li>
+          <li class="toc-h3"><a href="#auto-wireframe">自動処理済み表示 ワイヤーフレーム</a></li>
+          <li class="toc-h3"><a href="#auto-banner-spec">自動処理バナー仕様</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+          <li><a href="crm-gaibu-renkei.html">CRM外部連携詳細</a></li>
+          <li><a href="crm-webhook-sekkei.html">Webhook設計詳細</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        <li><a href="crm-gaibu-renkei.html">CRM外部連携詳細</a></li>
+        <li><a href="crm-webhook-sekkei.html">Webhook設計詳細</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

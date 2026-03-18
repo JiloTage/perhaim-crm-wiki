@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>分析ダッシュボード画面仕様 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; <a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a> &gt; 分析ダッシュボード画面仕様
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">分析ダッシュボード画面仕様</h1>
+      <div class="article-meta">最終更新: 2026-03-19</div>
+      <div class="article-summary">Per Heim CRM v3.2 分析ダッシュボード画面（<code>/crm/analytics</code>）のワイヤーフレームと詳細仕様。デュアルファネル比較、リードタイム分析、コンバージョン率テーブル、担当者別実績、月次レポートプレビューの各セクションを、HTMLモックアップ・Mermaidダイアグラムで視覚的に定義する。</div>
+
+      <p>
+        本記事は分析ダッシュボード画面の<b>ワイヤーフレームと視覚仕様</b>を中心に記述する。
+        フロントエンド全体のアーキテクチャは<a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a>を、
+        バックエンドAPIの詳細は<a href="crm-api-sekkei.html">CRM API設計</a>を、
+        分析機能の全体像は<a href="crm-bunseki-report.html">分析レポート詳細</a>を、
+        フェーズ管理の詳細は<a href="crm-phase-kanri.html">フェーズ管理詳細</a>を参照のこと。
+      </p>
+
+      <!-- ============================================================ -->
+      <h2 id="overall-layout">画面全体レイアウト</h2>
+      <!-- ============================================================ -->
+
+      <p>分析ダッシュボード画面はヘッダー＋3行構成で、データドリブンな営業分析を一画面で俯瞰できるレイアウトをとる。以下のワイヤーフレーム図で全体像を示す。</p>
+
+      <!-- HTML/CSSモックアップ: 全体レイアウト -->
+      <div style="border: 2px solid #90a4ae; border-radius: 8px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #fafafa;">
+
+        <!-- ヘッダー -->
+        <div style="background: #263238; color: white; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 16px;">
+            <span style="font-size: 18px; font-weight: 700;">分析</span>
+            <div style="display: flex; gap: 4px;">
+              <span style="background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; font-size: 13px; cursor: pointer;">7日</span>
+              <span style="background: #1976d2; padding: 4px 12px; border-radius: 4px; font-size: 13px; cursor: pointer; font-weight: 600;">30日</span>
+              <span style="background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; font-size: 13px; cursor: pointer;">90日</span>
+              <span style="background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; font-size: 13px; cursor: pointer;">カスタム</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <span style="background: #388e3c; padding: 6px 16px; border-radius: 4px; font-size: 13px; cursor: pointer; font-weight: 600;">エクスポート</span>
+          </div>
+        </div>
+
+        <!-- 1行目: デュアルファネル横並び -->
+        <div style="padding: 16px 20px; border-bottom: 1px solid #e0e0e0;">
+          <div style="font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">1行目: デュアルファネル比較</div>
+          <div style="display: flex; gap: 16px;">
+            <div style="flex: 1; background: #e3f2fd; border: 1px dashed #90caf9; border-radius: 6px; padding: 20px; text-align: center;">
+              <div style="font-weight: 600; color: #1976d2; margin-bottom: 4px;">全体ファネル</div>
+              <div style="font-size: 12px; color: #666;">反響45 → ヒアリング20 → 来店8 → 成約3</div>
+            </div>
+            <div style="flex: 1; background: #e8f5e9; border: 1px dashed #a5d6a7; border-radius: 6px; padding: 20px; text-align: center;">
+              <div style="font-weight: 600; color: #388e3c; margin-bottom: 4px;">Per Heim経由ファネル</div>
+              <div style="font-size: 12px; color: #666;">依頼20 → 完了15 → 来店7 → 成約3</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2行目: リードタイム + コンバージョン率 -->
+        <div style="padding: 16px 20px; border-bottom: 1px solid #e0e0e0;">
+          <div style="font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">2行目: リードタイム + コンバージョン率</div>
+          <div style="display: flex; gap: 16px;">
+            <div style="flex: 1; background: #fff3e0; border: 1px dashed #ffcc80; border-radius: 6px; padding: 20px; text-align: center;">
+              <div style="font-weight: 600; color: #f57c00; margin-bottom: 4px;">リードタイム分析チャート</div>
+              <div style="font-size: 12px; color: #666;">フェーズ間遷移の所要日数（横棒グラフ）</div>
+            </div>
+            <div style="flex: 1; background: #f3e5f5; border: 1px dashed #ce93d8; border-radius: 6px; padding: 20px; text-align: center;">
+              <div style="font-weight: 600; color: #7b1fa2; margin-bottom: 4px;">コンバージョン率テーブル</div>
+              <div style="font-size: 12px; color: #666;">全体 vs Per Heim経由 + 前月比</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3行目: 月次推移 + 担当者別 -->
+        <div style="padding: 16px 20px;">
+          <div style="font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">3行目: 月次推移 + 担当者別実績</div>
+          <div style="display: flex; gap: 16px;">
+            <div style="flex: 1; background: #e0f2f1; border: 1px dashed #80cbc4; border-radius: 6px; padding: 20px; text-align: center;">
+              <div style="font-weight: 600; color: #00796b; margin-bottom: 4px;">月次推移グラフ</div>
+              <div style="font-size: 12px; color: #666;">反響・来店・成約の月別推移折れ線</div>
+            </div>
+            <div style="flex: 1; background: #fce4ec; border: 1px dashed #ef9a9a; border-radius: 6px; padding: 20px; text-align: center;">
+              <div style="font-weight: 600; color: #c62828; margin-bottom: 4px;">担当者別実績テーブル</div>
+              <div style="font-size: 12px; color: #666;">担当者ランキング + バッジ</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p><b>レイアウト構成サマリ</b>:</p>
+      <table>
+        <thead>
+          <tr><th>行</th><th>左カラム</th><th>右カラム</th><th>高さ目安</th><th>データソース</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>ヘッダー</td><td colspan="2">「分析」タイトル + 期間セレクタ + エクスポート</td><td>56px</td><td>セッション情報</td></tr>
+          <tr><td>1行目</td><td>全体ファネル</td><td>Per Heim経由ファネル</td><td>320px</td><td><code>GET /v1/tenant/crm/analytics/funnel</code></td></tr>
+          <tr><td>2行目</td><td>リードタイム分析チャート</td><td>コンバージョン率テーブル</td><td>280px</td><td><code>GET /v1/tenant/crm/analytics/lead-time</code></td></tr>
+          <tr><td>3行目</td><td>月次推移グラフ</td><td>担当者別実績テーブル</td><td>360px</td><td><code>GET /v1/tenant/crm/analytics/monthly</code></td></tr>
+        </tbody>
+      </table>
+
+      <p>画面遷移のコンテキスト図:</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart LR
+    Dashboard["🏠 ダッシュボード\n/crm"] --> Analytics["📈 分析\n/crm/analytics"]
+    Analytics --> |"ファネルクリック"| Kanban["📋 カンバン\n/crm/kanban"]
+    Analytics --> |"担当者クリック"| CustomerList["👥 顧客一覧\n/crm/customers?assignee=xxx"]
+    Analytics --> |"PDF出力"| Report["📄 月次レポート\nPDF生成"]
+    Analytics --> |"CSV出力"| CSV["📊 CSVダウンロード"]
+    Analytics --> |"期間変更"| Analytics
+      </pre></div>
+
+      <!-- ============================================================ -->
+      <h2 id="dual-funnel">デュアルファネル比較</h2>
+      <!-- ============================================================ -->
+
+      <p>1行目に横並びで配置される2つのファネル。全体ファネルとPer Heim経由ファネルをバー形式で比較し、下部にサマリー表とPer Heim効果ハイライトを表示する。</p>
+
+      <h3 id="funnel-mockup">ファネル HTMLモックアップ</h3>
+
+      <!-- デュアルファネル HTMLモックアップ -->
+      <div style="display: flex; gap: 24px; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; flex-wrap: wrap;">
+
+        <!-- 左: 全体ファネル（バー形式） -->
+        <div style="flex: 1; min-width: 300px; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+          <div style="background: #1976d2; color: white; padding: 12px 16px; font-weight: 600; text-align: center;">全体ファネル</div>
+          <div style="padding: 16px;">
+            <!-- 反響: 45件 = 100% -->
+            <div style="margin-bottom: 4px;">
+              <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+                <span style="font-weight: 600;">反響</span><span style="font-weight: 700; color: #1976d2;">45件</span>
+              </div>
+              <div style="background: #e3f2fd; border-radius: 4px; height: 28px; overflow: hidden;">
+                <div style="width: 100%; height: 100%; background: #1976d2; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 600;">100%</div>
+              </div>
+            </div>
+            <!-- 矢印 + コンバージョン率 -->
+            <div style="text-align: center; font-size: 12px; color: #666; padding: 2px 0;">&#9660; 44.4%</div>
+            <!-- ヒアリング: 20件 -->
+            <div style="margin-bottom: 4px;">
+              <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+                <span style="font-weight: 600;">ヒアリング</span><span style="font-weight: 700; color: #1976d2;">20件</span>
+              </div>
+              <div style="background: #e3f2fd; border-radius: 4px; height: 28px; overflow: hidden;">
+                <div style="width: 44.4%; height: 100%; background: #42a5f5; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 600;">44.4%</div>
+              </div>
+            </div>
+            <div style="text-align: center; font-size: 12px; color: #666; padding: 2px 0;">&#9660; 40.0%</div>
+            <!-- 来店: 8件 -->
+            <div style="margin-bottom: 4px;">
+              <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+                <span style="font-weight: 600;">来店</span><span style="font-weight: 700; color: #1976d2;">8件</span>
+              </div>
+              <div style="background: #e3f2fd; border-radius: 4px; height: 28px; overflow: hidden;">
+                <div style="width: 17.8%; height: 100%; background: #64b5f6; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 600; min-width: 48px;">17.8%</div>
+              </div>
+            </div>
+            <div style="text-align: center; font-size: 12px; color: #666; padding: 2px 0;">&#9660; 37.5%</div>
+            <!-- 成約: 3件 -->
+            <div>
+              <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+                <span style="font-weight: 600;">成約</span><span style="font-weight: 700; color: #1976d2;">3件</span>
+              </div>
+              <div style="background: #e3f2fd; border-radius: 4px; height: 28px; overflow: hidden;">
+                <div style="width: 6.7%; height: 100%; background: #1565c0; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 600; min-width: 40px;">6.7%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右: Per Heim経由ファネル（バー形式） -->
+        <div style="flex: 1; min-width: 300px; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+          <div style="background: #388e3c; color: white; padding: 12px 16px; font-weight: 600; text-align: center;">Per Heim経由ファネル</div>
+          <div style="padding: 16px;">
+            <!-- 依頼: 20件 = 100% -->
+            <div style="margin-bottom: 4px;">
+              <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+                <span style="font-weight: 600;">ヒアリング依頼</span><span style="font-weight: 700; color: #388e3c;">20件</span>
+              </div>
+              <div style="background: #e8f5e9; border-radius: 4px; height: 28px; overflow: hidden;">
+                <div style="width: 100%; height: 100%; background: #388e3c; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 600;">100%</div>
+              </div>
+            </div>
+            <div style="text-align: center; font-size: 12px; color: #666; padding: 2px 0;">&#9660; 75.0%</div>
+            <!-- 完了: 15件 -->
+            <div style="margin-bottom: 4px;">
+              <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+                <span style="font-weight: 600;">ヒアリング完了</span><span style="font-weight: 700; color: #388e3c;">15件</span>
+              </div>
+              <div style="background: #e8f5e9; border-radius: 4px; height: 28px; overflow: hidden;">
+                <div style="width: 75%; height: 100%; background: #43a047; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 600;">75.0%</div>
+              </div>
+            </div>
+            <div style="text-align: center; font-size: 12px; color: #666; padding: 2px 0;">&#9660; 46.7%</div>
+            <!-- 来店: 7件 -->
+            <div style="margin-bottom: 4px;">
+              <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+                <span style="font-weight: 600;">来店</span><span style="font-weight: 700; color: #388e3c;">7件</span>
+              </div>
+              <div style="background: #e8f5e9; border-radius: 4px; height: 28px; overflow: hidden;">
+                <div style="width: 35%; height: 100%; background: #66bb6a; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 600; min-width: 48px;">35.0%</div>
+              </div>
+            </div>
+            <div style="text-align: center; font-size: 12px; color: #666; padding: 2px 0;">&#9660; 42.9%</div>
+            <!-- 成約: 3件 -->
+            <div>
+              <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+                <span style="font-weight: 600;">成約</span><span style="font-weight: 700; color: #388e3c;">3件</span>
+              </div>
+              <div style="background: #e8f5e9; border-radius: 4px; height: 28px; overflow: hidden;">
+                <div style="width: 15%; height: 100%; background: #2e7d32; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 600; min-width: 48px;">15.0%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 id="funnel-summary">比較サマリー表</h3>
+
+      <table>
+        <thead>
+          <tr><th>指標</th><th>全体</th><th>Per Heim経由</th><th>差分</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>来店率</b>（起点 → 来店）</td>
+            <td>17.8%</td>
+            <td style="color: #388e3c; font-weight: 700;">35.0%</td>
+            <td style="color: #388e3c; font-weight: 600;">+17.2pt</td>
+          </tr>
+          <tr>
+            <td><b>成約率</b>（起点 → 成約）</td>
+            <td>6.7%</td>
+            <td style="color: #388e3c; font-weight: 700;">15.0%</td>
+            <td style="color: #388e3c; font-weight: 600;">+8.3pt</td>
+          </tr>
+          <tr>
+            <td><b>ステップ間最高CV率</b></td>
+            <td>44.4%（反響→ヒアリング）</td>
+            <td style="color: #388e3c; font-weight: 700;">75.0%（依頼→完了）</td>
+            <td style="color: #388e3c; font-weight: 600;">+30.6pt</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="funnel-highlight">Per Heim効果ハイライト</h3>
+
+      <!-- Per Heim効果ハイライトカード -->
+      <div style="margin: 20px 0; padding: 24px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border: 2px solid #66bb6a; border-radius: 12px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+        <div style="font-size: 14px; color: #2e7d32; font-weight: 600; margin-bottom: 8px;">Per Heim 効果</div>
+        <div style="display: flex; justify-content: center; gap: 40px; flex-wrap: wrap;">
+          <div>
+            <div style="font-size: 48px; font-weight: 800; color: #2e7d32;">+97%</div>
+            <div style="font-size: 13px; color: #558b2f;">来店率の改善</div>
+            <div style="font-size: 11px; color: #999; margin-top: 2px;">17.8% → 35.0%</div>
+          </div>
+          <div>
+            <div style="font-size: 48px; font-weight: 800; color: #2e7d32;">+124%</div>
+            <div style="font-size: 13px; color: #558b2f;">成約率の改善</div>
+            <div style="font-size: 11px; color: #999; margin-top: 2px;">6.7% → 15.0%</div>
+          </div>
+        </div>
+        <div style="margin-top: 12px; font-size: 12px; color: #666;">※改善率 = (Per Heim経由率 - 全体率) / 全体率 &times; 100</div>
+      </div>
+
+      <h3 id="funnel-api">データソース</h3>
+
+      <pre><code>GET /v1/tenant/crm/analytics/funnel?period=30d
+
+Response:
+{
+  "overall": {
+    "inquiry":    45,
+    "hearing":    20,
+    "visit":       8,
+    "contracted":  3
+  },
+  "perheim": {
+    "hearing_requested": 20,
+    "hearing_done":      15,
+    "visit":              7,
+    "contracted":         3
+  },
+  "conversion_rates": {
+    "overall_visit_rate":      17.8,
+    "perheim_visit_rate":      35.0,
+    "overall_contract_rate":    6.7,
+    "perheim_contract_rate":   15.0
+  },
+  "perheim_effect": {
+    "visit_rate_improvement":    97.2,
+    "contract_rate_improvement": 123.9
+  }
+}</code></pre>
+
+      <!-- ============================================================ -->
+      <h2 id="lead-time">リードタイム分析</h2>
+      <!-- ============================================================ -->
+
+      <p>2行目左カラムに配置されるリードタイム分析チャート。各フェーズ間遷移の平均所要日数を横棒グラフ風のHTML表現で可視化し、ボトルネックとなる遷移を赤枠でハイライトする。</p>
+
+      <h3 id="lead-time-chart">リードタイムチャート HTMLモックアップ</h3>
+
+      <!-- 横棒グラフ風 HTMLモックアップ -->
+      <div style="border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+        <div style="background: #f57c00; color: white; padding: 12px 16px; font-weight: 600;">リードタイム分析（平均所要日数）</div>
+        <div style="padding: 20px;">
+
+          <!-- 反響→ヒアリング: 1.2日 -->
+          <div style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+              <span style="font-weight: 600;">反響 → ヒアリング</span>
+              <span style="font-weight: 700; color: #f57c00;">平均 1.2日</span>
+            </div>
+            <div style="background: #fff3e0; border-radius: 4px; height: 32px; overflow: hidden;">
+              <div style="width: 9.8%; min-width: 60px; height: 100%; background: linear-gradient(90deg, #ffb74d, #f57c00); border-radius: 4px; display: flex; align-items: center; padding-left: 12px; color: white; font-size: 12px; font-weight: 600;">1.2日</div>
+            </div>
+          </div>
+
+          <!-- ヒアリング→来店: 4.5日 -->
+          <div style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+              <span style="font-weight: 600;">ヒアリング → 来店</span>
+              <span style="font-weight: 700; color: #f57c00;">平均 4.5日</span>
+            </div>
+            <div style="background: #fff3e0; border-radius: 4px; height: 32px; overflow: hidden;">
+              <div style="width: 36.6%; min-width: 60px; height: 100%; background: linear-gradient(90deg, #ffb74d, #f57c00); border-radius: 4px; display: flex; align-items: center; padding-left: 12px; color: white; font-size: 12px; font-weight: 600;">4.5日</div>
+            </div>
+          </div>
+
+          <!-- 来店→成約: 12.3日（ボトルネック） -->
+          <div style="margin-bottom: 16px; border: 3px solid #d32f2f; border-radius: 8px; padding: 12px; background: #ffebee;">
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+              <span style="font-weight: 600;">来店 → 成約 <span style="background: #d32f2f; color: white; padding: 1px 8px; border-radius: 3px; font-size: 11px; margin-left: 8px;">ボトルネック</span></span>
+              <span style="font-weight: 700; color: #d32f2f;">平均 12.3日</span>
+            </div>
+            <div style="background: #ffcdd2; border-radius: 4px; height: 32px; overflow: hidden;">
+              <div style="width: 100%; height: 100%; background: linear-gradient(90deg, #ef5350, #d32f2f); border-radius: 4px; display: flex; align-items: center; padding-left: 12px; color: white; font-size: 12px; font-weight: 600;">12.3日</div>
+            </div>
+            <div style="font-size: 11px; color: #d32f2f; margin-top: 6px; font-weight: 500;">※ 全体リードタイムの68.3%を占有。来店後フォロー強化が課題。</div>
+          </div>
+
+          <!-- 合計 -->
+          <div style="border-top: 2px solid #e0e0e0; padding-top: 12px; display: flex; justify-content: space-between; font-size: 14px;">
+            <span style="font-weight: 700;">合計リードタイム（反響 → 成約）</span>
+            <span style="font-weight: 800; color: #263238; font-size: 18px;">平均 18.0日</span>
+          </div>
+        </div>
+      </div>
+
+      <h3 id="lead-time-gantt">フェーズ別リードタイム Ganttチャート</h3>
+
+      <div class="mermaid-container"><pre class="mermaid">
+gantt
+    title フェーズ別リードタイム（平均日数）
+    dateFormat X
+    axisFormat %d日
+    section 全体
+    反響→ヒアリング (1.2日)    :a1, 0, 1.2d
+    ヒアリング→来店 (4.5日)    :a2, after a1, 4.5d
+    来店→成約 (12.3日)         :crit, a3, after a2, 12.3d
+    section Per Heim経由
+    依頼→完了 (0.8日)          :b1, 0, 0.8d
+    完了→来店 (3.2日)          :b2, after b1, 3.2d
+    来店→成約 (9.1日)          :b3, after b2, 9.1d
+      </pre></div>
+
+      <h3 id="lead-time-detection">ボトルネック検出ロジック</h3>
+
+      <table>
+        <thead>
+          <tr><th>判定条件</th><th>表示</th><th>アクション</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>リードタイム占有率 &ge; 50%</td>
+            <td style="color: #d32f2f; font-weight: 600;">赤枠ハイライト + 「ボトルネック」バッジ</td>
+            <td>改善提案の自動表示</td>
+          </tr>
+          <tr>
+            <td>前月比 +20% 以上悪化</td>
+            <td style="color: #f57c00; font-weight: 600;">オレンジ枠 + 「悪化」バッジ</td>
+            <td>アラート通知</td>
+          </tr>
+          <tr>
+            <td>上記以外</td>
+            <td>通常表示</td>
+            <td>なし</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="lead-time-api">データソース</h3>
+
+      <pre><code>GET /v1/tenant/crm/analytics/lead-time?period=30d
+
+Response:
+{
+  "phases": [
+    {
+      "from": "inquiry",
+      "to": "hearing",
+      "avg_days": 1.2,
+      "median_days": 0.8,
+      "p90_days": 2.5,
+      "share_pct": 6.7,
+      "trend_vs_prev": -0.3
+    },
+    {
+      "from": "hearing",
+      "to": "visit",
+      "avg_days": 4.5,
+      "median_days": 3.8,
+      "p90_days": 8.2,
+      "share_pct": 25.0,
+      "trend_vs_prev": +0.2
+    },
+    {
+      "from": "visit",
+      "to": "contract",
+      "avg_days": 12.3,
+      "median_days": 10.5,
+      "p90_days": 22.0,
+      "share_pct": 68.3,
+      "trend_vs_prev": +1.1,
+      "is_bottleneck": true
+    }
+  ],
+  "total_avg_days": 18.0
+}</code></pre>
+
+      <!-- ============================================================ -->
+      <h2 id="conversion-table">コンバージョン率テーブル</h2>
+      <!-- ============================================================ -->
+
+      <p>2行目右カラムに配置されるコンバージョン率テーブル。各フェーズ遷移の全体率・Per Heim経由率・差分・前月比トレンドをセル内ミニバーチャートとともに表示する。</p>
+
+      <h3 id="conversion-mockup">コンバージョン率テーブル HTMLモックアップ</h3>
+
+      <!-- HTMLモックアップ: コンバージョン率テーブル -->
+      <div style="border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+        <div style="background: #7b1fa2; color: white; padding: 12px 16px; font-weight: 600;">コンバージョン率テーブル</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="background: #f5f5f5;">
+              <th style="padding: 10px 12px; text-align: left; border-bottom: 2px solid #e0e0e0;">フェーズ遷移</th>
+              <th style="padding: 10px 12px; text-align: center; border-bottom: 2px solid #e0e0e0;">全体率</th>
+              <th style="padding: 10px 12px; text-align: center; border-bottom: 2px solid #e0e0e0;">Per Heim経由率</th>
+              <th style="padding: 10px 12px; text-align: center; border-bottom: 2px solid #e0e0e0;">差分</th>
+              <th style="padding: 10px 12px; text-align: center; border-bottom: 2px solid #e0e0e0;">前月比</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- inquiry → hearing -->
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+              <td style="padding: 10px 12px; font-weight: 600;">反響 → ヒアリング</td>
+              <td style="padding: 10px 12px; text-align: center;">
+                <div>44.4%</div>
+                <div style="background: #e3f2fd; border-radius: 2px; height: 6px; margin-top: 4px; overflow: hidden;">
+                  <div style="width: 44.4%; height: 100%; background: #1976d2; border-radius: 2px;"></div>
+                </div>
+              </td>
+              <td style="padding: 10px 12px; text-align: center;">
+                <div>75.0%</div>
+                <div style="background: #e8f5e9; border-radius: 2px; height: 6px; margin-top: 4px; overflow: hidden;">
+                  <div style="width: 75%; height: 100%; background: #388e3c; border-radius: 2px;"></div>
+                </div>
+              </td>
+              <td style="padding: 10px 12px; text-align: center; color: #388e3c; font-weight: 700;">+30.6pt</td>
+              <td style="padding: 10px 12px; text-align: center; color: #388e3c; font-weight: 600;">&#9650; +2.1pt</td>
+            </tr>
+            <!-- hearing → visit -->
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+              <td style="padding: 10px 12px; font-weight: 600;">ヒアリング → 来店</td>
+              <td style="padding: 10px 12px; text-align: center;">
+                <div>40.0%</div>
+                <div style="background: #e3f2fd; border-radius: 2px; height: 6px; margin-top: 4px; overflow: hidden;">
+                  <div style="width: 40%; height: 100%; background: #1976d2; border-radius: 2px;"></div>
+                </div>
+              </td>
+              <td style="padding: 10px 12px; text-align: center;">
+                <div>46.7%</div>
+                <div style="background: #e8f5e9; border-radius: 2px; height: 6px; margin-top: 4px; overflow: hidden;">
+                  <div style="width: 46.7%; height: 100%; background: #388e3c; border-radius: 2px;"></div>
+                </div>
+              </td>
+              <td style="padding: 10px 12px; text-align: center; color: #388e3c; font-weight: 700;">+6.7pt</td>
+              <td style="padding: 10px 12px; text-align: center; color: #d32f2f; font-weight: 600;">&#9660; -1.5pt</td>
+            </tr>
+            <!-- visit → contract -->
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+              <td style="padding: 10px 12px; font-weight: 600;">来店 → 成約</td>
+              <td style="padding: 10px 12px; text-align: center;">
+                <div>37.5%</div>
+                <div style="background: #e3f2fd; border-radius: 2px; height: 6px; margin-top: 4px; overflow: hidden;">
+                  <div style="width: 37.5%; height: 100%; background: #1976d2; border-radius: 2px;"></div>
+                </div>
+              </td>
+              <td style="padding: 10px 12px; text-align: center;">
+                <div>42.9%</div>
+                <div style="background: #e8f5e9; border-radius: 2px; height: 6px; margin-top: 4px; overflow: hidden;">
+                  <div style="width: 42.9%; height: 100%; background: #388e3c; border-radius: 2px;"></div>
+                </div>
+              </td>
+              <td style="padding: 10px 12px; text-align: center; color: #388e3c; font-weight: 700;">+5.4pt</td>
+              <td style="padding: 10px 12px; text-align: center; color: #388e3c; font-weight: 600;">&#9650; +3.2pt</td>
+            </tr>
+            <!-- 全体: inquiry → contract -->
+            <tr style="background: #fafafa; font-weight: 600;">
+              <td style="padding: 10px 12px;">全体（反響 → 成約）</td>
+              <td style="padding: 10px 12px; text-align: center;">
+                <div>6.7%</div>
+                <div style="background: #e3f2fd; border-radius: 2px; height: 6px; margin-top: 4px; overflow: hidden;">
+                  <div style="width: 6.7%; height: 100%; background: #1976d2; border-radius: 2px; min-width: 4px;"></div>
+                </div>
+              </td>
+              <td style="padding: 10px 12px; text-align: center;">
+                <div>15.0%</div>
+                <div style="background: #e8f5e9; border-radius: 2px; height: 6px; margin-top: 4px; overflow: hidden;">
+                  <div style="width: 15%; height: 100%; background: #388e3c; border-radius: 2px;"></div>
+                </div>
+              </td>
+              <td style="padding: 10px 12px; text-align: center; color: #388e3c; font-weight: 700;">+8.3pt</td>
+              <td style="padding: 10px 12px; text-align: center; color: #388e3c; font-weight: 600;">&#9650; +1.8pt</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="conversion-bar-spec">ミニバーチャート仕様</h3>
+
+      <table>
+        <thead>
+          <tr><th>要素</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>バー高さ</td><td>6px</td></tr>
+          <tr><td>バー背景（全体）</td><td><code>#e3f2fd</code>、塗り: <code>#1976d2</code></td></tr>
+          <tr><td>バー背景（Per Heim）</td><td><code>#e8f5e9</code>、塗り: <code>#388e3c</code></td></tr>
+          <tr><td>幅</td><td>コンバージョン率%をそのままCSS <code>width</code> に適用</td></tr>
+          <tr><td>前月比トレンド</td><td>正: <span style="color:#388e3c;">&#9650; 緑</span>、負: <span style="color:#d32f2f;">&#9660; 赤</span>、0: <span style="color:#757575;">→ グレー</span></td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================================ -->
+      <h2 id="staff-performance">担当者別実績</h2>
+      <!-- ============================================================ -->
+
+      <p>3行目右カラムに配置される担当者ランキングテーブル。成約率降順でソートされ、上位3名にゴールド・シルバー・ブロンズのバッジが付与される。</p>
+
+      <h3 id="staff-mockup">担当者ランキング HTMLモックアップ</h3>
+
+      <!-- HTMLモックアップ: 担当者別実績 -->
+      <div style="border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+        <div style="background: #c62828; color: white; padding: 12px 16px; font-weight: 600; display: flex; justify-content: space-between; align-items: center;">
+          <span>担当者別実績</span>
+          <span style="font-size: 12px; opacity: 0.8;">成約率順 &#9660;</span>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="background: #f5f5f5;">
+              <th style="padding: 10px 12px; text-align: left; border-bottom: 2px solid #e0e0e0; cursor: pointer;">順位</th>
+              <th style="padding: 10px 12px; text-align: left; border-bottom: 2px solid #e0e0e0; cursor: pointer;">担当者名 &#9650;&#9660;</th>
+              <th style="padding: 10px 12px; text-align: center; border-bottom: 2px solid #e0e0e0; cursor: pointer;">担当顧客数 &#9650;&#9660;</th>
+              <th style="padding: 10px 12px; text-align: center; border-bottom: 2px solid #e0e0e0; cursor: pointer;">成約数 &#9650;&#9660;</th>
+              <th style="padding: 10px 12px; text-align: center; border-bottom: 2px solid #e0e0e0; cursor: pointer;">成約率 &#9650;&#9660;</th>
+              <th style="padding: 10px 12px; text-align: center; border-bottom: 2px solid #e0e0e0; cursor: pointer;">平均リードタイム &#9650;&#9660;</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- 1位: ゴールド -->
+            <tr style="border-bottom: 1px solid #f0f0f0; background: #fffde7;">
+              <td style="padding: 10px 12px;">
+                <span style="display: inline-block; width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #ffd54f, #ff8f00); color: white; text-align: center; line-height: 28px; font-weight: 800; font-size: 14px; box-shadow: 0 2px 4px rgba(255,143,0,0.3);">1</span>
+              </td>
+              <td style="padding: 10px 12px; font-weight: 600;">営業太郎</td>
+              <td style="padding: 10px 12px; text-align: center;">15</td>
+              <td style="padding: 10px 12px; text-align: center; font-weight: 700;">3</td>
+              <td style="padding: 10px 12px; text-align: center; font-weight: 700; color: #388e3c;">20.0%</td>
+              <td style="padding: 10px 12px; text-align: center;">14.2日</td>
+            </tr>
+            <!-- 2位: シルバー -->
+            <tr style="border-bottom: 1px solid #f0f0f0; background: #f5f5f5;">
+              <td style="padding: 10px 12px;">
+                <span style="display: inline-block; width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #e0e0e0, #9e9e9e); color: white; text-align: center; line-height: 28px; font-weight: 800; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.15);">2</span>
+              </td>
+              <td style="padding: 10px 12px; font-weight: 600;">営業花子</td>
+              <td style="padding: 10px 12px; text-align: center;">12</td>
+              <td style="padding: 10px 12px; text-align: center; font-weight: 700;">2</td>
+              <td style="padding: 10px 12px; text-align: center; font-weight: 700; color: #388e3c;">16.7%</td>
+              <td style="padding: 10px 12px; text-align: center;">16.8日</td>
+            </tr>
+            <!-- 3位: ブロンズ -->
+            <tr style="border-bottom: 1px solid #f0f0f0; background: #fff3e0;">
+              <td style="padding: 10px 12px;">
+                <span style="display: inline-block; width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #ffcc80, #e65100); color: white; text-align: center; line-height: 28px; font-weight: 800; font-size: 14px; box-shadow: 0 2px 4px rgba(230,81,0,0.2);">3</span>
+              </td>
+              <td style="padding: 10px 12px; font-weight: 600;">営業次郎</td>
+              <td style="padding: 10px 12px; text-align: center;">10</td>
+              <td style="padding: 10px 12px; text-align: center; font-weight: 700;">1</td>
+              <td style="padding: 10px 12px; text-align: center; font-weight: 700; color: #f57c00;">10.0%</td>
+              <td style="padding: 10px 12px; text-align: center;">19.5日</td>
+            </tr>
+            <!-- 4位 -->
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+              <td style="padding: 10px 12px;">
+                <span style="display: inline-block; width: 28px; height: 28px; border-radius: 50%; background: #e0e0e0; color: #757575; text-align: center; line-height: 28px; font-weight: 600; font-size: 14px;">4</span>
+              </td>
+              <td style="padding: 10px 12px;">営業三郎</td>
+              <td style="padding: 10px 12px; text-align: center;">8</td>
+              <td style="padding: 10px 12px; text-align: center;">0</td>
+              <td style="padding: 10px 12px; text-align: center; color: #d32f2f;">0.0%</td>
+              <td style="padding: 10px 12px; text-align: center; color: #999;">-</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="staff-badge-spec">バッジ仕様</h3>
+
+      <table>
+        <thead>
+          <tr><th>順位</th><th>バッジ</th><th>背景グラデーション</th><th>行背景色</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1位</td>
+            <td><span style="display: inline-block; width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #ffd54f, #ff8f00); color: white; text-align: center; line-height: 24px; font-weight: 800; font-size: 12px;">1</span> ゴールド</td>
+            <td><code>#ffd54f → #ff8f00</code></td>
+            <td style="background: #fffde7;"><code>#fffde7</code></td>
+          </tr>
+          <tr>
+            <td>2位</td>
+            <td><span style="display: inline-block; width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #e0e0e0, #9e9e9e); color: white; text-align: center; line-height: 24px; font-weight: 800; font-size: 12px;">2</span> シルバー</td>
+            <td><code>#e0e0e0 → #9e9e9e</code></td>
+            <td style="background: #f5f5f5;"><code>#f5f5f5</code></td>
+          </tr>
+          <tr>
+            <td>3位</td>
+            <td><span style="display: inline-block; width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #ffcc80, #e65100); color: white; text-align: center; line-height: 24px; font-weight: 800; font-size: 12px;">3</span> ブロンズ</td>
+            <td><code>#ffcc80 → #e65100</code></td>
+            <td style="background: #fff3e0;"><code>#fff3e0</code></td>
+          </tr>
+          <tr>
+            <td>4位以下</td>
+            <td><span style="display: inline-block; width: 24px; height: 24px; border-radius: 50%; background: #e0e0e0; color: #757575; text-align: center; line-height: 24px; font-weight: 600; font-size: 12px;">4</span> なし</td>
+            <td><code>#e0e0e0</code></td>
+            <td>白</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="staff-sort">ソート仕様</h3>
+
+      <table>
+        <thead>
+          <tr><th>カラム</th><th>デフォルト</th><th>ソート順</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>担当者名</td><td>-</td><td>あいうえお順</td></tr>
+          <tr><td>担当顧客数</td><td>-</td><td>数値降順/昇順トグル</td></tr>
+          <tr><td>成約数</td><td>-</td><td>数値降順/昇順トグル</td></tr>
+          <tr><td>成約率</td><td style="font-weight: 600;">デフォルトソート</td><td>降順 → クリックで昇順</td></tr>
+          <tr><td>平均リードタイム</td><td>-</td><td>数値昇順/降順トグル</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="staff-api">データソース</h3>
+
+      <pre><code>GET /v1/tenant/crm/analytics/staff-performance?period=30d&sort=contract_rate_desc
+
+Response:
+{
+  "staff": [
+    {
+      "user_id": "user_001",
+      "name": "営業太郎",
+      "customer_count": 15,
+      "contract_count": 3,
+      "contract_rate": 20.0,
+      "avg_lead_time_days": 14.2,
+      "rank": 1
+    },
+    ...
+  ],
+  "total_staff": 4
+}</code></pre>
+
+      <!-- ============================================================ -->
+      <h2 id="monthly-report">月次レポートプレビュー</h2>
+      <!-- ============================================================ -->
+
+      <p>月次レポートの生成・プレビュー・ダウンロード機能。レポートカバーに主要KPI 3つを表示し、PDF/CSV出力と過去レポート一覧を提供する。</p>
+
+      <h3 id="report-preview">レポートプレビュー HTMLモックアップ</h3>
+
+      <!-- HTMLモックアップ: 月次レポートプレビュー -->
+      <div style="border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; margin: 20px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+        <div style="background: #1565c0; color: white; padding: 12px 16px; font-weight: 600;">月次レポートプレビュー</div>
+
+        <!-- レポートカバー -->
+        <div style="padding: 24px; background: linear-gradient(135deg, #1a237e 0%, #283593 50%, #1565c0 100%); color: white; text-align: center;">
+          <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 2px; opacity: 0.8; margin-bottom: 4px;">Monthly Report</div>
+          <div style="font-size: 28px; font-weight: 800; margin-bottom: 4px;">2026年3月</div>
+          <div style="font-size: 13px; opacity: 0.8; margin-bottom: 20px;">CRM営業分析レポート</div>
+
+          <!-- KPI 3つ -->
+          <div style="display: flex; justify-content: center; gap: 24px; flex-wrap: wrap;">
+            <div style="background: rgba(255,255,255,0.15); padding: 16px 24px; border-radius: 8px; min-width: 140px;">
+              <div style="font-size: 11px; opacity: 0.8; text-transform: uppercase;">新規反響</div>
+              <div style="font-size: 32px; font-weight: 800;">45<span style="font-size: 16px;">件</span></div>
+              <div style="font-size: 12px; color: #81c784;">&#9650; +12% 前月比</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.15); padding: 16px 24px; border-radius: 8px; min-width: 140px;">
+              <div style="font-size: 11px; opacity: 0.8; text-transform: uppercase;">成約数</div>
+              <div style="font-size: 32px; font-weight: 800;">3<span style="font-size: 16px;">件</span></div>
+              <div style="font-size: 12px; color: #81c784;">&#9650; +50% 前月比</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.15); padding: 16px 24px; border-radius: 8px; min-width: 140px;">
+              <div style="font-size: 11px; opacity: 0.8; text-transform: uppercase;">成約率</div>
+              <div style="font-size: 32px; font-weight: 800;">6.7<span style="font-size: 16px;">%</span></div>
+              <div style="font-size: 12px; color: #81c784;">&#9650; +1.2pt 前月比</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 出力ボタン -->
+        <div style="padding: 16px; display: flex; gap: 12px; justify-content: center; border-bottom: 1px solid #e0e0e0;">
+          <div style="background: #d32f2f; color: white; padding: 10px 24px; border-radius: 6px; font-weight: 600; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 16px;">&#128196;</span> PDF出力
+          </div>
+          <div style="background: #388e3c; color: white; padding: 10px 24px; border-radius: 6px; font-weight: 600; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 16px;">&#128202;</span> CSV出力
+          </div>
+        </div>
+
+        <!-- 過去レポート一覧 -->
+        <div style="padding: 16px;">
+          <div style="font-weight: 600; margin-bottom: 12px; font-size: 14px;">過去のレポート</div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #f5f5f5; border-radius: 4px;">
+              <div>
+                <span style="font-weight: 600;">2026年2月</span>
+                <span style="color: #999; margin-left: 8px; font-size: 12px;">反響38件 / 成約2件</span>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <a href="#" style="font-size: 12px; color: #d32f2f; text-decoration: none; font-weight: 600;">PDF</a>
+                <a href="#" style="font-size: 12px; color: #388e3c; text-decoration: none; font-weight: 600;">CSV</a>
+              </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #f5f5f5; border-radius: 4px;">
+              <div>
+                <span style="font-weight: 600;">2026年1月</span>
+                <span style="color: #999; margin-left: 8px; font-size: 12px;">反響35件 / 成約1件</span>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <a href="#" style="font-size: 12px; color: #d32f2f; text-decoration: none; font-weight: 600;">PDF</a>
+                <a href="#" style="font-size: 12px; color: #388e3c; text-decoration: none; font-weight: 600;">CSV</a>
+              </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #f5f5f5; border-radius: 4px;">
+              <div>
+                <span style="font-weight: 600;">2025年12月</span>
+                <span style="color: #999; margin-left: 8px; font-size: 12px;">反響30件 / 成約2件</span>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <a href="#" style="font-size: 12px; color: #d32f2f; text-decoration: none; font-weight: 600;">PDF</a>
+                <a href="#" style="font-size: 12px; color: #388e3c; text-decoration: none; font-weight: 600;">CSV</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 id="report-flow">レポート生成フロー</h3>
+
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart LR
+    A["月初バッチ\n(Cloud Scheduler)"] --> B["集計処理\n(Cloud Functions)"]
+    B --> C{"集計完了?"}
+    C --> |"成功"| D["PDF生成\n(Puppeteer)"]
+    C --> |"失敗"| E["リトライ\n(最大3回)"]
+    E --> B
+    D --> F["Cloud Storage\n保存"]
+    F --> G["メール通知\n(SendGrid)"]
+    G --> H["管理者に\n配信完了"]
+
+    style A fill:#e3f2fd,stroke:#1976d2
+    style D fill:#ffebee,stroke:#d32f2f
+    style F fill:#e8f5e9,stroke:#388e3c
+    style G fill:#fff3e0,stroke:#f57c00
+      </pre></div>
+
+      <h3 id="report-api">データソース</h3>
+
+      <pre><code>GET /v1/tenant/crm/analytics/reports
+
+Response:
+{
+  "current_month": {
+    "year": 2026,
+    "month": 3,
+    "kpi": {
+      "new_inquiries": { "value": 45, "trend_pct": 12.0 },
+      "contracted":    { "value": 3,  "trend_pct": 50.0 },
+      "contract_rate": { "value": 6.7, "trend_pt": 1.2 }
+    },
+    "status": "draft"
+  },
+  "past_reports": [
+    {
+      "year": 2026, "month": 2,
+      "summary": "反響38件 / 成約2件",
+      "pdf_url": "/reports/2026-02.pdf",
+      "csv_url": "/reports/2026-02.csv"
+    },
+    {
+      "year": 2026, "month": 1,
+      "summary": "反響35件 / 成約1件",
+      "pdf_url": "/reports/2026-01.pdf",
+      "csv_url": "/reports/2026-01.csv"
+    },
+    {
+      "year": 2025, "month": 12,
+      "summary": "反響30件 / 成約2件",
+      "pdf_url": "/reports/2025-12.pdf",
+      "csv_url": "/reports/2025-12.csv"
+    }
+  ]
+}
+
+POST /v1/tenant/crm/analytics/reports/export
+Body: { "format": "pdf"|"csv", "period": "2026-03" }
+
+Response:
+{
+  "download_url": "https://storage.googleapis.com/.../report-2026-03.pdf",
+  "expires_at": "2026-03-19T15:00:00+09:00"
+}</code></pre>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#overall-layout">画面全体レイアウト</a></li>
+          <li><a href="#dual-funnel">デュアルファネル比較</a></li>
+          <li class="toc-h3"><a href="#funnel-mockup">ファネル HTMLモックアップ</a></li>
+          <li class="toc-h3"><a href="#funnel-summary">比較サマリー表</a></li>
+          <li class="toc-h3"><a href="#funnel-highlight">Per Heim効果ハイライト</a></li>
+          <li class="toc-h3"><a href="#funnel-api">データソース</a></li>
+          <li><a href="#lead-time">リードタイム分析</a></li>
+          <li class="toc-h3"><a href="#lead-time-chart">リードタイムチャート HTMLモックアップ</a></li>
+          <li class="toc-h3"><a href="#lead-time-gantt">フェーズ別リードタイム Ganttチャート</a></li>
+          <li class="toc-h3"><a href="#lead-time-detection">ボトルネック検出ロジック</a></li>
+          <li class="toc-h3"><a href="#lead-time-api">データソース</a></li>
+          <li><a href="#conversion-table">コンバージョン率テーブル</a></li>
+          <li class="toc-h3"><a href="#conversion-mockup">コンバージョン率テーブル HTMLモックアップ</a></li>
+          <li class="toc-h3"><a href="#conversion-bar-spec">ミニバーチャート仕様</a></li>
+          <li><a href="#staff-performance">担当者別実績</a></li>
+          <li class="toc-h3"><a href="#staff-mockup">担当者ランキング HTMLモックアップ</a></li>
+          <li class="toc-h3"><a href="#staff-badge-spec">バッジ仕様</a></li>
+          <li class="toc-h3"><a href="#staff-sort">ソート仕様</a></li>
+          <li class="toc-h3"><a href="#staff-api">データソース</a></li>
+          <li><a href="#monthly-report">月次レポートプレビュー</a></li>
+          <li class="toc-h3"><a href="#report-preview">レポートプレビュー HTMLモックアップ</a></li>
+          <li class="toc-h3"><a href="#report-flow">レポート生成フロー</a></li>
+          <li class="toc-h3"><a href="#report-api">データソース</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+          <li><a href="crm-bunseki-report.html">分析レポート詳細</a></li>
+          <li><a href="crm-phase-kanri.html">フェーズ管理詳細</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        <li><a href="crm-bunseki-report.html">分析レポート詳細</a></li>
+        <li><a href="crm-phase-kanri.html">フェーズ管理詳細</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>
