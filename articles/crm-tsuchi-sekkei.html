@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>通知設計詳細 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; <a href="crm-jissou-phase.html">CRM実装フェーズ計画</a> &gt; 通知設計詳細
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">通知設計詳細</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2における通知基盤の詳細設計。<b>3段階の通知チャネル</b>（即時・日次・エスカレーション）、<b>7種の通知イベント</b>定義、<b>NotificationService</b>を中核とした処理アーキテクチャ、<b>Web Push</b>によるリアルタイム通知、<b>Cloud Tasks/Scheduler</b>によるバッチ通知、およびユーザー単位の<b>通知設定・制御</b>機能を包括的にカバーする。</div>
+
+      <!-- ============================================ -->
+      <!-- 通知チャネル設計 -->
+      <!-- ============================================ -->
+      <h2 id="tsuchi-channel-sekkei">通知チャネル設計</h2>
+      <p>CRM通知は、情報の<b>緊急度</b>と<b>重要度</b>に応じて3段階のチャネルに分類される。不動産営業では反響への<b>即時対応</b>が成約率に直結するため、チャネル設計は「営業が最速で行動できる」ことを最優先とする。</p>
+
+      <h3 id="channel-immediate">即時通知（Web Push + バッジ）</h3>
+      <p><b>目的</b>: 営業担当者に即座にアクションを促す。反響受信・ヒアリング完了・LINE受信など、<b>顧客との接点発生</b>を即時に伝達する。</p>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>配信方式</b></td><td>Web Push API（Service Worker経由） + Firestore <code>onSnapshot</code> によるCRM画面内バッジ</td></tr>
+          <tr><td><b>遅延許容</b></td><td>5秒以内</td></tr>
+          <tr><td><b>対象ブラウザ</b></td><td>Chrome, Edge, Firefox（Safari は将来対応）</td></tr>
+          <tr><td><b>オフライン時</b></td><td>Push通知はブラウザ再起動時に配信。バッジはFirestoreリアルタイム同期により次回アクセス時に反映</td></tr>
+          <tr><td><b>既読管理</b></td><td>バッジクリック時に <code>notifications/{id}.read_at</code> を更新</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="channel-daily">日次通知（メール）</h3>
+      <p><b>目的</b>: 営業担当者の日次業務をサポートする。朝のタスクサマリーと夕方の未完了リマインダーにより、<b>業務の開始と振り返り</b>を自動化する。</p>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>配信方式</b></td><td>Cloud Scheduler → Cloud Tasks → SendGrid API / Gmail API</td></tr>
+          <tr><td><b>テンプレート</b></td><td>HTML + プレーンテキスト の multipart/alternative</td></tr>
+          <tr><td><b>差出人</b></td><td><code>noreply@{tenant_domain}</code> またはテナント設定のメールアドレス</td></tr>
+          <tr><td><b>配信停止</b></td><td>メール末尾に1クリック配信停止リンク（List-Unsubscribeヘッダー付与）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="channel-escalation">エスカレーション通知（メール + Push）</h3>
+      <p><b>目的</b>: <b>対応遅延</b>をマネージャーに自動エスカレーションする。反響未対応30分超過やタスク期限1日超過を検知し、管理者に即座に通知する。</p>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>配信方式</b></td><td>Cloud Scheduler による定期チェック → 条件合致時に メール + Web Push</td></tr>
+          <tr><td><b>対象者</b></td><td>該当テナントの <code>manager</code> ロールを持つ従業員</td></tr>
+          <tr><td><b>エスカレーション階層</b></td><td>1次: 直属マネージャー → 2次（未対応1時間超過）: テナント管理者</td></tr>
+          <tr><td><b>重複抑止</b></td><td>同一イベントに対し1時間以内の再通知を抑止（<code>notification_cooldown</code>）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="channel-comparison">チャネル比較サマリー</h3>
+      <table>
+        <thead>
+          <tr><th>レベル</th><th>チャネル</th><th>実装方式</th><th>遅延</th><th>対象</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>即時</b></td>
+            <td>Web Push + バッジ</td>
+            <td>Service Worker + Firestore <code>onSnapshot</code></td>
+            <td>&lt;5秒</td>
+            <td>担当者</td>
+          </tr>
+          <tr>
+            <td><b>日次</b></td>
+            <td>メール</td>
+            <td>Cloud Scheduler + SendGrid / Gmail API</td>
+            <td>スケジュール</td>
+            <td>全従業員</td>
+          </tr>
+          <tr>
+            <td><b>エスカレーション</b></td>
+            <td>メール + Push</td>
+            <td>Cloud Scheduler + 条件判定ロジック</td>
+            <td>チェック間隔依存</td>
+            <td>マネージャー</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- 通知イベント定義 -->
+      <!-- ============================================ -->
+      <h2 id="tsuchi-event-teigi">通知イベント定義</h2>
+      <p>CRM通知イベントは<b>7種</b>定義され、<b>即時通知</b>（3種）、<b>日次バッチ</b>（2種）、<b>エスカレーション</b>（2種）に分類される。各イベントはPython辞書 <code>NOTIFICATION_EVENTS</code> として一元管理し、<a href="crm-api-sekkei.html">CRM API設計</a>のエンドポイントから発火される。</p>
+
+      <h3 id="event-immediate">即時通知イベント</h3>
+
+      <h4 id="event-inquiry-received">inquiry_received（新規反響受信）</h4>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>トリガー</b></td><td>SUUMOやHOME'Sからの反響メール取込完了時、または手動顧客登録時</td></tr>
+          <tr><td><b>対象者</b></td><td><code>assigned_employee</code>（割当済みの場合）または <code>round_robin</code> で自動選択</td></tr>
+          <tr><td><b>チャネル</b></td><td>push + badge</td></tr>
+          <tr><td><b>メッセージ</b></td><td><code>新規反響: {customer_name} ({source})</code></td></tr>
+          <tr><td><b>ペイロード</b></td><td><code>{ event: "inquiry_received", customer_id, source, assigned_to }</code></td></tr>
+          <tr><td><b>アクション</b></td><td>通知クリックで顧客詳細画面に遷移</td></tr>
+        </tbody>
+      </table>
+
+      <h4 id="event-hearing-completed">hearing_completed（AIヒアリング完了）</h4>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>トリガー</b></td><td><code>complete_session</code> のCRMイベントフック発火時</td></tr>
+          <tr><td><b>対象者</b></td><td><code>assigned_employee</code></td></tr>
+          <tr><td><b>チャネル</b></td><td>push + badge</td></tr>
+          <tr><td><b>メッセージ</b></td><td><code>{customer_name}のAIヒアリングが完了しました</code></td></tr>
+          <tr><td><b>ペイロード</b></td><td><code>{ event: "hearing_completed", customer_id, session_id, needs_tags[] }</code></td></tr>
+          <tr><td><b>アクション</b></td><td>通知クリックで顧客カードのAIプロファイルタブに遷移</td></tr>
+        </tbody>
+      </table>
+
+      <h4 id="event-line-received">line_received（LINEメッセージ受信）</h4>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>トリガー</b></td><td>LINE Webhook受信 → <code>user_id</code> → <code>customer_id</code> マッピング解決後</td></tr>
+          <tr><td><b>対象者</b></td><td><code>assigned_employee</code></td></tr>
+          <tr><td><b>チャネル</b></td><td>push + badge</td></tr>
+          <tr><td><b>メッセージ</b></td><td><code>{customer_name}からLINEメッセージ</code></td></tr>
+          <tr><td><b>ペイロード</b></td><td><code>{ event: "line_received", customer_id, line_user_id, preview }</code></td></tr>
+          <tr><td><b>アクション</b></td><td>通知クリックでコミュニケーション画面のLINEタブに遷移</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="event-daily">日次バッチイベント</h3>
+
+      <h4 id="event-daily-task-summary">daily_task_summary（日次タスクサマリー）</h4>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>トリガー</b></td><td>Cloud Scheduler: 毎日 <b>09:00 JST</b></td></tr>
+          <tr><td><b>対象者</b></td><td><code>all_employees</code>（テナント内全従業員）</td></tr>
+          <tr><td><b>チャネル</b></td><td>email</td></tr>
+          <tr><td><b>メッセージ</b></td><td><code>本日のタスク: {pending_count}件</code></td></tr>
+          <tr><td><b>メール内容</b></td><td>未完了タスクリスト（期限順）、本日の予定来店、フォローアップ対象顧客一覧</td></tr>
+          <tr><td><b>送信条件</b></td><td>タスクが0件でも送信（「本日のタスクはありません」表示）</td></tr>
+        </tbody>
+      </table>
+
+      <h4 id="event-overdue-reminder">overdue_reminder（未完了タスクリマインダー）</h4>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>トリガー</b></td><td>Cloud Scheduler: 毎日 <b>17:00 JST</b></td></tr>
+          <tr><td><b>対象者</b></td><td><code>assigned_employee</code>（未完了タスクを持つ担当者のみ）</td></tr>
+          <tr><td><b>チャネル</b></td><td>email + badge</td></tr>
+          <tr><td><b>メッセージ</b></td><td><code>未完了タスク: {overdue_count}件</code></td></tr>
+          <tr><td><b>メール内容</b></td><td>期限超過タスクリスト（超過日数順）、各タスクの顧客名と期限日</td></tr>
+          <tr><td><b>送信条件</b></td><td>未完了タスクがある場合のみ送信</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="event-escalation">エスカレーションイベント</h3>
+
+      <h4 id="event-inquiry-unresponded">inquiry_unresponded_30min（反響未対応30分超過）</h4>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>トリガー</b></td><td>Cloud Scheduler: <b>5分間隔</b>で未対応反響をチェック → <code>created_at</code> から30分超過を検知</td></tr>
+          <tr><td><b>対象者</b></td><td><code>manager</code>（該当店舗のマネージャー）</td></tr>
+          <tr><td><b>チャネル</b></td><td>email + push</td></tr>
+          <tr><td><b>メッセージ</b></td><td><code>反響未対応30分超過: {customer_name}</code></td></tr>
+          <tr><td><b>判定条件</b></td><td>顧客フェーズが <code>new</code> かつ <code>first_response_at</code> が NULL かつ <code>created_at</code> + 30分 &lt; 現在時刻</td></tr>
+          <tr><td><b>クールダウン</b></td><td>同一顧客に対し1時間以内の再通知を抑止</td></tr>
+        </tbody>
+      </table>
+
+      <h4 id="event-task-overdue">task_overdue_1day（タスク期限1日超過）</h4>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>トリガー</b></td><td>Cloud Scheduler: 毎日 <b>10:00 JST</b> にチェック</td></tr>
+          <tr><td><b>対象者</b></td><td><code>manager</code>（該当タスク担当者の直属マネージャー）</td></tr>
+          <tr><td><b>チャネル</b></td><td>email</td></tr>
+          <tr><td><b>メッセージ</b></td><td><code>タスク期限1日超過: {task_title} (担当: {employee_name})</code></td></tr>
+          <tr><td><b>判定条件</b></td><td>タスクステータスが <code>pending</code> / <code>in_progress</code> かつ <code>due_date</code> + 1日 &lt; 現在日</td></tr>
+          <tr><td><b>クールダウン</b></td><td>同一タスクに対し24時間以内の再通知を抑止</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="event-summary-table">イベント一覧サマリー</h3>
+      <table>
+        <thead>
+          <tr><th>イベント名</th><th>分類</th><th>チャネル</th><th>対象</th><th>タイミング</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>inquiry_received</code></td><td>即時</td><td>push + badge</td><td>担当者</td><td>反響受信時</td></tr>
+          <tr><td><code>hearing_completed</code></td><td>即時</td><td>push + badge</td><td>担当者</td><td>ヒアリング完了時</td></tr>
+          <tr><td><code>line_received</code></td><td>即時</td><td>push + badge</td><td>担当者</td><td>LINE受信時</td></tr>
+          <tr><td><code>daily_task_summary</code></td><td>日次</td><td>email</td><td>全従業員</td><td>09:00 JST</td></tr>
+          <tr><td><code>overdue_reminder</code></td><td>日次</td><td>email + badge</td><td>担当者</td><td>17:00 JST</td></tr>
+          <tr><td><code>inquiry_unresponded_30min</code></td><td>エスカレ</td><td>email + push</td><td>マネージャー</td><td>5分間隔チェック</td></tr>
+          <tr><td><code>task_overdue_1day</code></td><td>エスカレ</td><td>email</td><td>マネージャー</td><td>10:00 JST</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- NotificationServiceアーキテクチャ -->
+      <!-- ============================================ -->
+      <h2 id="notification-service-arch">NotificationServiceアーキテクチャ</h2>
+      <p>通知の送信は<b>NotificationService</b>クラスが一元管理する。すべての通知イベントはこのサービスを経由し、チャネルに応じた<b>処理分岐</b>（Web Push API / Firestore write / Cloud Tasks enqueue）を行う。この設計により、通知ロジックの集約と将来のチャネル追加（Slack連携など）を容易にする。</p>
+
+      <h3 id="ns-class-design">クラス設計</h3>
+      <p><code>NotificationService</code>は以下の責務を持つ:</p>
+      <ul>
+        <li><b>イベント受信</b>: CRM各モジュールからの通知リクエストを <code>notify(event_type, context)</code> メソッドで受け付ける</li>
+        <li><b>対象者解決</b>: イベント定義の <code>target</code> フィールドに基づき通知対象の従業員を解決する（<code>assigned_employee</code>, <code>round_robin</code>, <code>manager</code>, <code>all_employees</code>）</li>
+        <li><b>チャネル分岐</b>: イベント定義の <code>channel</code> フィールドに基づき配信チャネルを決定する</li>
+        <li><b>通知設定フィルタ</b>: ユーザーの通知設定（ON/OFF、営業時間フィルタ）を適用する</li>
+        <li><b>クールダウン判定</b>: 重複通知の抑止ロジックを適用する</li>
+        <li><b>配信実行</b>: チャネルごとのアダプターを呼び出して実際の通知を送信する</li>
+        <li><b>配信記録</b>: 全通知を <code>crm_notifications/{tenant_id}/logs</code> に記録する</li>
+      </ul>
+
+      <h3 id="ns-flow">処理フロー</h3>
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TD
+    A["CRMモジュール<br/>イベント発火"] --> B["NotificationService<br/>.notify(event_type, context)"]
+    B --> C{"対象者解決"}
+    C -->|assigned_employee| D["担当者取得"]
+    C -->|round_robin| E["ラウンドロビン選択"]
+    C -->|manager| F["マネージャー取得"]
+    C -->|all_employees| G["全従業員取得"]
+
+    D --> H{"通知設定チェック"}
+    E --> H
+    F --> H
+    G --> H
+
+    H -->|OFF| I["通知スキップ<br/>ログ記録"]
+    H -->|ON| J{"営業時間<br/>フィルタ"}
+
+    J -->|時間外 & 即時以外| K["キュー保留<br/>→ 営業時間開始時に配信"]
+    J -->|時間内 or 即時| L{"クールダウン<br/>チェック"}
+
+    L -->|抑止期間内| I
+    L -->|配信可| M{"チャネル分岐"}
+
+    M -->|push| N["Web Push API<br/>Service Worker経由"]
+    M -->|badge| O["Firestore write<br/>notifications/{id}"]
+    M -->|email| P["Cloud Tasks<br/>enqueue"]
+
+    N --> Q["配信ログ記録"]
+    O --> Q
+    P --> R["Cloud Tasks<br/>Worker"]
+    R --> S["SendGrid API<br/>メール送信"]
+    S --> Q
+
+    style A fill:#e3f2fd,stroke:#2196f3
+    style B fill:#e8f5e9,stroke:#4caf50
+    style M fill:#fff3e0,stroke:#ff9800
+    style N fill:#f3e5f5,stroke:#9c27b0
+    style O fill:#f3e5f5,stroke:#9c27b0
+    style P fill:#f3e5f5,stroke:#9c27b0
+      </pre></div>
+
+      <h3 id="ns-error-handling">エラーハンドリング</h3>
+      <table>
+        <thead>
+          <tr><th>障害パターン</th><th>対策</th><th>リトライ</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Web Push API 送信失敗</b></td>
+            <td>ステータスコード 410（Gone）の場合はサブスクリプション削除。それ以外はリトライ</td>
+            <td>最大3回、指数バックオフ（1s, 2s, 4s）</td>
+          </tr>
+          <tr>
+            <td><b>Firestore write 失敗</b></td>
+            <td>トランザクション再試行。永続的失敗はエラーログに記録</td>
+            <td>Firestore SDK の自動リトライに委譲</td>
+          </tr>
+          <tr>
+            <td><b>Cloud Tasks enqueue 失敗</b></td>
+            <td>即座にリトライ。失敗持続時はデッドレターキューに退避</td>
+            <td>最大5回、指数バックオフ</td>
+          </tr>
+          <tr>
+            <td><b>SendGrid API エラー</b></td>
+            <td>429（Rate Limit）はバックオフ後リトライ。5xx はリトライ。4xx はエラーログ</td>
+            <td>Cloud Tasks のリトライポリシーに委譲（最大10回）</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- Web Push実装 -->
+      <!-- ============================================ -->
+      <h2 id="web-push-impl">Web Push実装</h2>
+      <p><b>Web Push API</b>を用いたブラウザ通知は、CRMのリアルタイム通知の中核をなす。Service Workerの登録からプッシュサブスクリプション管理、ペイロード設計まで、実装に必要な全仕様を定義する。</p>
+
+      <h3 id="sw-registration">Service Worker登録</h3>
+      <p>CRMフロントエンドの初期化時に Service Worker を登録する。</p>
+      <ul>
+        <li><b>ファイル配置</b>: <code>frontend/public/sw-crm-push.js</code></li>
+        <li><b>登録タイミング</b>: CRM画面の初回アクセス時（<code>CrmLayout</code> コンポーネントの <code>useEffect</code>）</li>
+        <li><b>スコープ</b>: <code>/crm/</code> 配下のみ</li>
+        <li><b>更新戦略</b>: <code>registration.update()</code> をアプリ起動時に毎回呼び出し</li>
+      </ul>
+
+      <h3 id="push-subscription">Pushサブスクリプション管理</h3>
+      <p>ユーザーごとの Push サブスクリプション情報を Firestore に管理する。</p>
+      <ul>
+        <li><b>保存先</b>: <code>crm_push_subscriptions/{tenant_id}/employees/{employee_id}/devices/{device_id}</code></li>
+        <li><b>保存データ</b>: <code>endpoint</code>, <code>keys.p256dh</code>, <code>keys.auth</code>, <code>user_agent</code>, <code>created_at</code>, <code>last_used_at</code></li>
+        <li><b>複数デバイス</b>: 1従業員あたり最大<b>5デバイス</b>まで登録可能。超過時は <code>last_used_at</code> が最も古いものを自動削除</li>
+        <li><b>VAPID鍵管理</b>: <code>VAPID_PUBLIC_KEY</code> / <code>VAPID_PRIVATE_KEY</code> を Secret Manager に格納</li>
+      </ul>
+
+      <h3 id="push-payload">ペイロード設計</h3>
+      <p>Push通知のペイロードは以下の共通構造に従う:</p>
+      <table>
+        <thead>
+          <tr><th>フィールド</th><th>型</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>title</code></td><td>string</td><td>通知タイトル（例: 「新規反響」）</td></tr>
+          <tr><td><code>body</code></td><td>string</td><td>通知本文（例: 「田中太郎 (SUUMO)」）</td></tr>
+          <tr><td><code>icon</code></td><td>string</td><td>CRMアイコンURL（<code>/crm/icons/notification.png</code>）</td></tr>
+          <tr><td><code>badge</code></td><td>string</td><td>バッジアイコンURL（モノクロ、72x72px）</td></tr>
+          <tr><td><code>tag</code></td><td>string</td><td>イベント種別（同一tagの通知は上書き表示）</td></tr>
+          <tr><td><code>data.event_type</code></td><td>string</td><td>イベント名（<code>inquiry_received</code> 等）</td></tr>
+          <tr><td><code>data.customer_id</code></td><td>string</td><td>対象顧客ID</td></tr>
+          <tr><td><code>data.url</code></td><td>string</td><td>通知クリック時の遷移先URL</td></tr>
+          <tr><td><code>data.tenant_id</code></td><td>string</td><td>テナントID</td></tr>
+          <tr><td><code>data.timestamp</code></td><td>string</td><td>ISO 8601形式のイベント発生時刻</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- Cloud Tasks/Schedulerによるバッチ通知 -->
+      <!-- ============================================ -->
+      <h2 id="batch-notification">Cloud Tasks/Schedulerによるバッチ通知</h2>
+      <p><b>Cloud Scheduler</b>が定期的にHTTPトリガーを発火し、<b>Cloud Tasks</b>が個々のメール送信をキューイングする。この2層構造により、スケジュール管理とメール配信の責務を分離し、大量配信時の<b>スロットリング</b>と<b>リトライ</b>を確実に行う。</p>
+
+      <h3 id="scheduler-jobs">Cloud Schedulerジョブ定義</h3>
+      <table>
+        <thead>
+          <tr><th>ジョブ名</th><th>スケジュール（cron）</th><th>トリガーURL</th><th>処理内容</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>daily_summary</b></td>
+            <td><code>0 9 * * *</code> (JST)</td>
+            <td><code>POST /api/crm/notifications/daily-summary</code></td>
+            <td>全テナントの全従業員に日次タスクサマリーメール送信</td>
+          </tr>
+          <tr>
+            <td><b>overdue_check</b></td>
+            <td><code>0 17 * * *</code> (JST)</td>
+            <td><code>POST /api/crm/notifications/overdue-check</code></td>
+            <td>未完了タスクを持つ担当者にリマインダーメール送信</td>
+          </tr>
+          <tr>
+            <td><b>monthly_report</b></td>
+            <td><code>0 9 1 * *</code> (JST)</td>
+            <td><code>POST /api/crm/notifications/monthly-report</code></td>
+            <td>テナント管理者に月次サマリーレポートメール送信</td>
+          </tr>
+          <tr>
+            <td><b>escalation_check</b></td>
+            <td><code>*/5 9-18 * * 1-5</code> (JST)</td>
+            <td><code>POST /api/crm/notifications/escalation-check</code></td>
+            <td>反響未対応30分超過チェック（平日9:00-18:00の5分間隔）</td>
+          </tr>
+          <tr>
+            <td><b>task_overdue_escalation</b></td>
+            <td><code>0 10 * * *</code> (JST)</td>
+            <td><code>POST /api/crm/notifications/task-overdue-escalation</code></td>
+            <td>タスク期限1日超過をマネージャーにエスカレーション</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="scheduler-timeline">スケジュールタイムライン</h3>
+      <div class="mermaid-container"><pre class="mermaid">
+gantt
+    title 1日の通知スケジュール（平日）
+    dateFormat HH:mm
+    axisFormat %H:%M
+
+    section 日次バッチ
+    daily_summary メール送信        :milestone, 09:00, 0min
+    overdue_reminder メール送信     :milestone, 17:00, 0min
+
+    section エスカレーション
+    escalation_check (5分間隔)      :active, 09:00, 540min
+    task_overdue_escalation         :milestone, 10:00, 0min
+
+    section 月次（毎月1日のみ）
+    monthly_report                  :milestone, 09:00, 0min
+      </pre></div>
+
+      <h3 id="cloud-tasks-config">Cloud Tasks キュー設定</h3>
+      <table>
+        <thead>
+          <tr><th>設定項目</th><th>値</th><th>理由</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>キュー名</b></td><td><code>crm-email-queue</code></td><td>CRM通知メール専用</td></tr>
+          <tr><td><b>最大同時実行数</b></td><td>10</td><td>SendGrid API のレートリミット考慮</td></tr>
+          <tr><td><b>最大リトライ回数</b></td><td>10</td><td>一時的障害に対する十分なリトライ</td></tr>
+          <tr><td><b>最小バックオフ</b></td><td>10秒</td><td>初回リトライの待機時間</td></tr>
+          <tr><td><b>最大バックオフ</b></td><td>3600秒（1時間）</td><td>最大リトライ間隔</td></tr>
+          <tr><td><b>タスクTTL</b></td><td>86400秒（24時間）</td><td>24時間以内に送信できなければ破棄</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="batch-flow">バッチ通知処理フロー</h3>
+      <p>Cloud Schedulerのトリガーを受けた<a href="crm-api-sekkei.html">CRM APIエンドポイント</a>は以下の手順で処理する:</p>
+      <ol>
+        <li>全テナントのリストを取得</li>
+        <li>テナントごとに対象従業員をクエリ</li>
+        <li>従業員ごとにメール内容を生成</li>
+        <li>Cloud Tasks キューにタスクを enqueue（1メール = 1タスク）</li>
+        <li>Cloud Tasks Worker が SendGrid API を呼び出してメール送信</li>
+        <li>送信結果を <code>crm_notifications/{tenant_id}/logs</code> に記録</li>
+      </ol>
+
+      <!-- ============================================ -->
+      <!-- 通知設定・ユーザー制御 -->
+      <!-- ============================================ -->
+      <h2 id="tsuchi-settings">通知設定・ユーザー制御</h2>
+      <p>通知の受信はユーザーが制御できる必要がある。<b>テナントレベル</b>と<b>従業員レベル</b>の2階層で通知設定を管理し、テナント設定が上位の制約として機能する。</p>
+
+      <h3 id="settings-tenant">テナントレベル設定</h3>
+      <p>テナント管理者が設定する全社的な通知ポリシー。<code>crm_settings/{tenant_id}/notification</code> に保存する。</p>
+      <table>
+        <thead>
+          <tr><th>設定項目</th><th>型</th><th>デフォルト</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>push_enabled</code></td><td>boolean</td><td><code>true</code></td><td>Web Push通知の全社ON/OFF</td></tr>
+          <tr><td><code>email_enabled</code></td><td>boolean</td><td><code>true</code></td><td>メール通知の全社ON/OFF</td></tr>
+          <tr><td><code>escalation_enabled</code></td><td>boolean</td><td><code>true</code></td><td>エスカレーション通知のON/OFF</td></tr>
+          <tr><td><code>business_hours_start</code></td><td>string</td><td><code>"09:00"</code></td><td>営業時間開始（JST）</td></tr>
+          <tr><td><code>business_hours_end</code></td><td>string</td><td><code>"18:00"</code></td><td>営業時間終了（JST）</td></tr>
+          <tr><td><code>business_days</code></td><td>number[]</td><td><code>[1,2,3,4,5]</code></td><td>営業曜日（0=日, 1=月, ...6=土）</td></tr>
+          <tr><td><code>escalation_threshold_min</code></td><td>number</td><td><code>30</code></td><td>エスカレーションまでの未対応時間（分）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="settings-employee">従業員レベル設定</h3>
+      <p>各従業員が個人の通知受信を制御する。<code>crm_settings/{tenant_id}/employees/{employee_id}/notification</code> に保存する。テナントレベルで無効化されているチャネルは従業員レベルで有効化できない。</p>
+      <table>
+        <thead>
+          <tr><th>設定項目</th><th>型</th><th>デフォルト</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>push_enabled</code></td><td>boolean</td><td><code>true</code></td><td>Web Push通知の個人ON/OFF</td></tr>
+          <tr><td><code>email_enabled</code></td><td>boolean</td><td><code>true</code></td><td>メール通知の個人ON/OFF</td></tr>
+          <tr><td><code>daily_summary_enabled</code></td><td>boolean</td><td><code>true</code></td><td>日次タスクサマリーメールのON/OFF</td></tr>
+          <tr><td><code>overdue_reminder_enabled</code></td><td>boolean</td><td><code>true</code></td><td>未完了リマインダーのON/OFF</td></tr>
+          <tr><td><code>quiet_hours_enabled</code></td><td>boolean</td><td><code>false</code></td><td>営業時間外の通知抑止</td></tr>
+          <tr><td><code>quiet_hours_start</code></td><td>string</td><td><code>"20:00"</code></td><td>個人静寂時間開始</td></tr>
+          <tr><td><code>quiet_hours_end</code></td><td>string</td><td><code>"08:00"</code></td><td>個人静寂時間終了</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="settings-filter-logic">営業時間フィルタロジック</h3>
+      <p>通知配信時の営業時間フィルタは以下の優先順位で適用する:</p>
+      <ol>
+        <li><b>即時通知（エスカレーション含む）</b>: 営業時間フィルタを<b>バイパス</b>（常に配信）</li>
+        <li><b>従業員の quiet_hours</b>: 有効な場合、Push通知を抑止（メールは配信）</li>
+        <li><b>テナントの business_hours</b>: 営業時間外の日次バッチ通知は次の営業時間開始時にキューイング</li>
+      </ol>
+
+      <h3 id="settings-ui">通知設定画面</h3>
+      <p>CRM設定画面（<code>/crm/settings/notifications</code>）にて以下を提供する:</p>
+      <ul>
+        <li><b>管理者向け</b>: テナントレベルの全通知設定、エスカレーション閾値調整、営業時間設定</li>
+        <li><b>従業員向け</b>: 個人の通知ON/OFF切り替え、静寂時間設定、テスト通知送信ボタン</li>
+        <li><b>通知履歴</b>: 直近30日間の通知配信ログ一覧（ステータス、配信日時、チャネル）</li>
+      </ul>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#tsuchi-channel-sekkei">通知チャネル設計</a></li>
+          <li class="toc-h3"><a href="#channel-immediate">即時通知（Web Push + バッジ）</a></li>
+          <li class="toc-h3"><a href="#channel-daily">日次通知（メール）</a></li>
+          <li class="toc-h3"><a href="#channel-escalation">エスカレーション通知</a></li>
+          <li class="toc-h3"><a href="#channel-comparison">チャネル比較サマリー</a></li>
+          <li><a href="#tsuchi-event-teigi">通知イベント定義</a></li>
+          <li class="toc-h3"><a href="#event-immediate">即時通知イベント</a></li>
+          <li class="toc-h3"><a href="#event-daily">日次バッチイベント</a></li>
+          <li class="toc-h3"><a href="#event-escalation">エスカレーションイベント</a></li>
+          <li class="toc-h3"><a href="#event-summary-table">イベント一覧サマリー</a></li>
+          <li><a href="#notification-service-arch">NotificationServiceアーキテクチャ</a></li>
+          <li class="toc-h3"><a href="#ns-class-design">クラス設計</a></li>
+          <li class="toc-h3"><a href="#ns-flow">処理フロー</a></li>
+          <li class="toc-h3"><a href="#ns-error-handling">エラーハンドリング</a></li>
+          <li><a href="#web-push-impl">Web Push実装</a></li>
+          <li class="toc-h3"><a href="#sw-registration">Service Worker登録</a></li>
+          <li class="toc-h3"><a href="#push-subscription">Pushサブスクリプション管理</a></li>
+          <li class="toc-h3"><a href="#push-payload">ペイロード設計</a></li>
+          <li><a href="#batch-notification">Cloud Tasks/Schedulerによるバッチ通知</a></li>
+          <li class="toc-h3"><a href="#scheduler-jobs">Cloud Schedulerジョブ定義</a></li>
+          <li class="toc-h3"><a href="#scheduler-timeline">スケジュールタイムライン</a></li>
+          <li class="toc-h3"><a href="#cloud-tasks-config">Cloud Tasksキュー設定</a></li>
+          <li class="toc-h3"><a href="#batch-flow">バッチ通知処理フロー</a></li>
+          <li><a href="#tsuchi-settings">通知設定・ユーザー制御</a></li>
+          <li class="toc-h3"><a href="#settings-tenant">テナントレベル設定</a></li>
+          <li class="toc-h3"><a href="#settings-employee">従業員レベル設定</a></li>
+          <li class="toc-h3"><a href="#settings-filter-logic">営業時間フィルタロジック</a></li>
+          <li class="toc-h3"><a href="#settings-ui">通知設定画面</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-jissou-phase.html">CRM実装フェーズ計画</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-jissou-phase.html">CRM実装フェーズ計画</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-jissou-phase.html">CRM実装フェーズ計画</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>カンバン実装詳細 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a> &gt; カンバン実装詳細
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">カンバン実装詳細</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2 のカンバンビュー（<code>/crm/kanban</code>）の実装設計を詳述する。KanbanBoard・KanbanColumn・CustomerCard の3層コンポーネント構成、@dnd-kit によるドラッグ&amp;ドロップ、楽観的UI更新とロールバック戦略、8カラムのフェーズ別表示仕様、パフォーマンス最適化手法を包括的に定義する。</div>
+
+      <p>
+        Per Heim CRM v3.2 のカンバンビューは、<b>CustomerPhase</b>（顧客フェーズ）をカラムとして顧客カードを視覚的に管理する中核画面である。
+        営業担当者は<b>ドラッグ&amp;ドロップ</b>操作でカード（顧客）をカラム間で移動させ、<b>フェーズ遷移</b>をシームレスに実行できる。
+        フロントエンド全体の設計方針は<a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a>を、
+        フェーズ遷移のビジネスロジックは<a href="crm-phase-kanri.html">CRMフェーズ管理</a>を、
+        バックエンドAPIの仕様は<a href="crm-api-sekkei.html">CRM API設計</a>を参照のこと。
+      </p>
+
+      <h2 id="component-design">カンバンコンポーネント設計</h2>
+
+      <p>カンバンビューは<b>3層のコンポーネント階層</b>で構成される。各コンポーネントの責務を明確に分離し、再利用性とテスタビリティを確保する。</p>
+
+      <h3 id="kanban-board">KanbanBoard（ボード層）</h3>
+      <p><code>KanbanBoard.tsx</code> はカンバン全体のコンテナコンポーネントである。以下の責務を持つ:</p>
+      <ul>
+        <li>横スクロール可能なフレックスコンテナの提供（<code>overflow-x: auto</code>）</li>
+        <li><b>@dnd-kit</b> の <code>DndContext</code> プロバイダーとしてドラッグ&amp;ドロップのスコープを定義</li>
+        <li><code>useCustomers</code> hooks を通じた<a href="crm-api-sekkei.html">カンバンAPI</a>（<code>GET /v1/tenant/crm/kanban</code>）からのデータ取得</li>
+        <li>フィルタ条件（<code>store_id</code>、<code>assigned_to</code>）のクエリパラメータ管理</li>
+      </ul>
+
+      <p><b>Props / State 設計:</b></p>
+      <pre><code>// KanbanBoard Props
+interface KanbanBoardProps {
+  storeId?: string;       // 店舗フィルタ
+  assignedTo?: string;    // 担当者フィルタ
+}
+
+// KanbanBoard 内部 State
+const [columns, setColumns] = useState&lt;KanbanColumnData[]&gt;([]);
+const [activeCard, setActiveCard] = useState&lt;CustomerSummary | null&gt;(null);
+const [isMoving, setIsMoving] = useState(false);</code></pre>
+
+      <h3 id="kanban-column">KanbanColumn（カラム層）</h3>
+      <p><code>KanbanColumn.tsx</code> は個別のフェーズカラムを描画するコンポーネントである:</p>
+      <ul>
+        <li>カラムヘッダー（フェーズ名 + 件数バッジ）の表示</li>
+        <li><b>@dnd-kit</b> の <code>useDroppable</code> によるドロップ領域の定義</li>
+        <li>カラム内の <code>CustomerCard</code> リストの描画とソート制御</li>
+        <li>カラム幅は CSS変数 <code>--crm-kanban-column-width: 280px</code> で統一</li>
+      </ul>
+
+      <p><b>Props 設計:</b></p>
+      <pre><code>interface KanbanColumnProps {
+  phase: CustomerPhase;
+  title: string;
+  customers: CustomerSummary[];
+  count: number;
+  colorToken: string;  // --crm-phase-inquiry 等のCSS変数名
+}</code></pre>
+
+      <h3 id="customer-card-component">CustomerCard（カード層）</h3>
+      <p><code>CustomerCard.tsx</code> はドラッグ可能な顧客カードコンポーネントである。<b>@dnd-kit</b> の <code>useDraggable</code> を使用してカードをドラッグ対象として登録する。カードの詳細表示は後述の<a href="#customer-card-display">CustomerCardコンポーネント</a>セクションで解説する。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+graph TD
+    subgraph KanbanBoard["KanbanBoard.tsx"]
+        direction TB
+        DndCtx["DndContext<br/>ドラッグ&amp;ドロップスコープ"]
+        Filter["フィルタ（店舗・担当者）"]
+        ScrollContainer["横スクロールコンテナ"]
+    end
+
+    subgraph Col1["KanbanColumn (inquiry)"]
+        Header1["反響 (12)"]
+        Drop1["useDroppable"]
+        Card1A["CustomerCard"]
+        Card1B["CustomerCard"]
+    end
+
+    subgraph Col2["KanbanColumn (hearing_pending)"]
+        Header2["ヒアリング待ち (5)"]
+        Drop2["useDroppable"]
+        Card2A["CustomerCard"]
+    end
+
+    subgraph Col3["KanbanColumn (hearing_done)"]
+        Header3["ヒアリング済み (8)"]
+        Drop3["useDroppable"]
+        Card3A["CustomerCard"]
+    end
+
+    subgraph ColN["...（残り5カラム）"]
+        HeaderN["..."]
+    end
+
+    KanbanBoard --> Col1
+    KanbanBoard --> Col2
+    KanbanBoard --> Col3
+    KanbanBoard --> ColN
+
+    Card1A -- "useDraggable" --> DndCtx
+    Card2A -- "useDraggable" --> DndCtx
+      </pre></div>
+
+      <h2 id="drag-and-drop">ドラッグ&amp;ドロップ実装</h2>
+
+      <p>カンバンビューのドラッグ&amp;ドロップは、React向けD&amp;Dライブラリ <b>@dnd-kit</b> を採用して実装する。</p>
+
+      <h3 id="library-selection">ライブラリ選定</h3>
+      <p>D&amp;Dライブラリの選定にあたり、主要2ライブラリを比較した結果 <b>@dnd-kit</b> を採用する:</p>
+
+      <table>
+        <thead>
+          <tr><th>項目</th><th>@dnd-kit</th><th>react-beautiful-dnd</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>メンテナンス状況</b></td><td>活発（2024年〜）</td><td>Atlassianがメンテナンス終了（非推奨）</td></tr>
+          <tr><td><b>React 18対応</b></td><td>完全対応</td><td>StrictMode で問題あり</td></tr>
+          <tr><td><b>アクセシビリティ</b></td><td>組み込みサポート（キーボード操作・スクリーンリーダー）</td><td>基本サポート</td></tr>
+          <tr><td><b>カスタマイズ性</b></td><td>hooks ベースで高い柔軟性</td><td>限定的</td></tr>
+          <tr><td><b>バンドルサイズ</b></td><td>約 12KB (gzip)</td><td>約 30KB (gzip)</td></tr>
+          <tr><td><b>タッチデバイス</b></td><td>PointerSensor で統合対応</td><td>別途設定必要</td></tr>
+        </tbody>
+      </table>
+
+      <p><b>採用理由</b>: react-beautiful-dnd はAtlassianによるメンテナンスが終了しており、React 18 の StrictMode との互換性問題がある。@dnd-kit はhooksベースのモダンなAPIを提供し、バンドルサイズが小さく、アクセシビリティサポートも充実している。</p>
+
+      <h3 id="dnd-event-handling">ドラッグイベントハンドリング</h3>
+      <p><code>KanbanBoard</code> 内の <code>DndContext</code> で以下の3イベントをハンドリングする:</p>
+
+      <pre><code>// KanbanBoard.tsx 内
+&lt;DndContext
+  sensors={sensors}
+  collisionDetection={closestCorners}
+  onDragStart={handleDragStart}
+  onDragOver={handleDragOver}
+  onDragEnd={handleDragEnd}
+&gt;
+  {columns.map(col =&gt; (
+    &lt;KanbanColumn key={col.phase} {...col} /&gt;
+  ))}
+  &lt;DragOverlay&gt;
+    {activeCard &amp;&amp; &lt;CustomerCard customer={activeCard} isDragging /&gt;}
+  &lt;/DragOverlay&gt;
+&lt;/DndContext&gt;</code></pre>
+
+      <table>
+        <thead>
+          <tr><th>イベント</th><th>トリガー</th><th>処理内容</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>onDragStart</code></td><td>カードをつかんだ瞬間</td><td><code>activeCard</code> state にドラッグ中の顧客情報をセット。<code>DragOverlay</code> にゴーストカードを表示</td></tr>
+          <tr><td><code>onDragOver</code></td><td>別カラム上にカードが通過</td><td>ドロップ先カラムのハイライト表示。ただしフェーズ遷移ルールに反する場合は <b>禁止アイコン</b> を表示</td></tr>
+          <tr><td><code>onDragEnd</code></td><td>カードをドロップ</td><td>楽観的UI更新を実行し、<code>POST /v1/tenant/crm/kanban/move</code> APIを呼び出す（後述）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="phase-transition-api">ドロップ時のフェーズ遷移API呼び出し</h3>
+      <p>カードがドロップされた時点で、以下のフローが実行される:</p>
+      <ol>
+        <li>ドロップ先カラムの <code>phase</code> を取得</li>
+        <li>同一カラムへのドロップの場合は何もしない（カラム内ソート変更は将来対応）</li>
+        <li>楽観的UI更新を即座に適用（後述）</li>
+        <li><a href="crm-api-sekkei.html">カンバンAPI</a> の <code>POST /v1/tenant/crm/kanban/move</code> を呼び出し:
+          <pre><code>POST /v1/tenant/crm/kanban/move
+Body: {
+  customer_id: string,
+  to_phase: CustomerPhase,
+  reason?: string    // オプション：遷移理由モーダルで入力
+}</code></pre>
+        </li>
+        <li>API応答に基づき確定またはロールバック</li>
+      </ol>
+
+      <h2 id="optimistic-update">楽観的UI更新</h2>
+
+      <p>カンバンビューでは<b>楽観的UI更新（Optimistic UI Update）</b>パターンを採用し、ドラッグ操作の体感速度を最大化する。ユーザーがカードをドロップした瞬間にUIを即座に更新し、バックグラウンドでAPIリクエストを送信する。</p>
+
+      <h3 id="optimistic-flow">楽観的更新フロー</h3>
+
+      <div class="mermaid-container"><pre class="mermaid">
+sequenceDiagram
+    participant User as ユーザー
+    participant UI as KanbanBoard
+    participant State as ローカルState
+    participant API as カンバンAPI
+
+    User->>UI: カードをドロップ
+    UI->>State: 1. スナップショット保存（rollbackState）
+    UI->>State: 2. 即座にカラム間移動を反映
+    State-->>UI: UIが即座に更新される
+    UI->>API: 3. POST /kanban/move（非同期）
+
+    alt API成功
+        API-->>UI: 200 OK + Customer
+        UI->>State: 4a. 確定（rollbackState 破棄）
+        UI-->>User: 成功トースト表示
+    else API失敗（遷移ルール違反等）
+        API-->>UI: 400/500 Error
+        UI->>State: 4b. rollbackState に復元
+        State-->>UI: UIが元の位置に戻る
+        UI-->>User: エラートースト表示
+    end
+      </pre></div>
+
+      <h3 id="rollback-strategy">ロールバック戦略</h3>
+      <p><b>スナップショット方式</b>を採用し、ドラッグ操作前のカラムデータ全体を保持する:</p>
+
+      <pre><code>const handleDragEnd = async (event: DragEndEvent) =&gt; {
+  const { active, over } = event;
+  if (!over) return;
+
+  const fromPhase = active.data.current?.phase;
+  const toPhase = over.id as CustomerPhase;
+  if (fromPhase === toPhase) return;
+
+  // 1. スナップショット保存
+  const snapshot = structuredClone(columns);
+
+  // 2. 楽観的更新（即座にUI反映）
+  setColumns(prev =&gt; moveCardBetweenColumns(prev, active.id, fromPhase, toPhase));
+
+  try {
+    // 3. API呼び出し
+    await moveCustomerPhase(active.id as string, toPhase, reason);
+    // 4a. 成功 → 確定
+    toast.success(`${customerName} を ${phaseLabel(toPhase)} に移動しました`);
+  } catch (error) {
+    // 4b. 失敗 → ロールバック
+    setColumns(snapshot);
+    toast.error(getErrorMessage(error));
+  }
+};</code></pre>
+
+      <p><b>ロールバックが発生するケース</b>:</p>
+      <ul>
+        <li><b>フェーズ遷移ルール違反</b>: 例えば <code>inquiry</code> → <code>contracted</code> への直接遷移など、<a href="crm-phase-kanri.html">フェーズ管理</a>で定義されたルールに反する移動（APIが400を返す）</li>
+        <li><b>権限不足</b>: 担当者以外が他担当の顧客を遷移させようとした場合</li>
+        <li><b>ネットワークエラー</b>: API通信が失敗した場合</li>
+        <li><b>同時操作の競合</b>: 他ユーザーが同一顧客を同時に操作した場合（409 Conflict）</li>
+      </ul>
+
+      <h3 id="reason-modal">遷移理由モーダル</h3>
+      <p>特定のフェーズ遷移（例: <code>lost</code> への遷移）時には、ドロップ後にオプションの理由入力モーダルを表示する。モーダルで「キャンセル」が選択された場合はロールバックを実行する。</p>
+
+      <h2 id="column-spec">カンバンカラム仕様</h2>
+
+      <p>カンバンビューは <code>CustomerPhase</code> の10フェーズのうち<b>8カラム</b>を表示する。</p>
+
+      <h3 id="column-list">表示カラム一覧</h3>
+      <table>
+        <thead>
+          <tr><th>#</th><th>カラム名</th><th>フェーズ値</th><th>背景色トークン</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>反響</td><td><code>inquiry</code></td><td><code>--crm-phase-inquiry</code></td><td>ポータルサイトからの反響受信直後</td></tr>
+          <tr><td>2</td><td>ヒアリング待ち</td><td><code>hearing_pending</code></td><td><code>--crm-phase-hearing</code></td><td>ヒアリングURL発行済み・回答待ち</td></tr>
+          <tr><td>3</td><td>ヒアリング中</td><td><code>hearing_active</code></td><td><code>--crm-phase-hearing</code></td><td>AIヒアリング回答中</td></tr>
+          <tr><td>4</td><td>ヒアリング済み</td><td><code>hearing_done</code></td><td><code>--crm-phase-hearing</code></td><td>ヒアリング完了・条件整理済み</td></tr>
+          <tr><td>5</td><td>来店予約</td><td><code>visit_reserved</code></td><td><code>--crm-phase-visit</code></td><td>来店予約確定</td></tr>
+          <tr><td>6</td><td>来店済み</td><td><code>visited</code></td><td><code>--crm-phase-visit</code></td><td>来店完了・物件提案中</td></tr>
+          <tr><td>7</td><td>内見</td><td><code>viewing</code></td><td><code>--crm-phase-visit</code></td><td>物件内見実施中</td></tr>
+          <tr><td>8</td><td>申込</td><td><code>application</code></td><td><code>--crm-phase-contracted</code></td><td>申込手続き中</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="excluded-phases">除外フェーズ: lost / contracted</h3>
+      <p>以下の2フェーズはカンバンボードに<b>カラムとして表示しない</b>:</p>
+      <ul>
+        <li><b><code>lost</code>（失注）</b>: 営業パイプラインから離脱した顧客であり、カンバンで視覚的に管理する対象ではない。失注顧客は顧客一覧（<code>/crm/customers</code>）でフィルタ表示する</li>
+        <li><b><code>contracted</code>（成約）</b>: 営業プロセスが完了した顧客であり、パイプライン管理の対象外。成約実績はダッシュボードのKPIカードや分析画面で確認する</li>
+      </ul>
+      <p>ただし、カンバン上のカードを <code>lost</code> にドラッグする操作は、ボード下部に表示される「失注にする」ドロップゾーンで対応する。この操作時には失注理由の入力モーダルが必須で表示される。</p>
+
+      <h3 id="column-sort">カラム内ソート</h3>
+      <p>各カラム内の顧客カードは以下の<b>3段階優先度</b>でソートされる:</p>
+      <ol>
+        <li><b>優先度（priority）</b>: <code>high</code> → <code>medium</code> → <code>low</code>（タスクの緊急度に基づく）</li>
+        <li><b>期限（next_action_deadline）</b>: 期限が近い順（昇順）。期限切れの顧客が最上部に表示される</li>
+        <li><b>更新日時（updated_at）</b>: 最終更新が古い順（昇順）。長期間放置されている顧客が上位に来る</li>
+      </ol>
+      <p>このソートロジックにより、<b>対応が急務な顧客カード</b>がカラム上部に自然と集まる設計となっている。</p>
+
+      <h2 id="customer-card-display">CustomerCardコンポーネント</h2>
+
+      <p><code>CustomerCard.tsx</code> はカンバン上の個別顧客カードの表示を担当する。コンパクトなカード形式で必要最小限の情報を表示し、詳細は顧客カード画面（<code>/crm/customers/:id</code>）に委ねる。</p>
+
+      <h3 id="card-display-info">カード内表示情報</h3>
+      <table>
+        <thead>
+          <tr><th>表示項目</th><th>データソース</th><th>表示例</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>顧客名</b></td><td><code>customer.name</code></td><td>田中太郎</td></tr>
+          <tr><td><b>ソースアイコン</b></td><td><code>customer.source</code></td><td>SUUMO / HOME'S / 手動 等のアイコン</td></tr>
+          <tr><td><b>経過時間</b></td><td><code>customer.phase_changed_at</code> からの経過</td><td>5分前 / 2時間前 / 3日前</td></tr>
+          <tr><td><b>担当者</b></td><td><code>customer.assigned_to_name</code></td><td>担当: 営業A</td></tr>
+          <tr><td><b>ニーズタグプレビュー</b></td><td><code>customer.needs_tags</code> の上位2件</td><td>🔴 1階不可 🟢 駅近</td></tr>
+        </tbody>
+      </table>
+
+      <p><b>カードの視覚的要素</b>:</p>
+      <ul>
+        <li>カード左端にフェーズカラー（CSS変数 <code>--crm-phase-*</code>）のアクセントボーダーを表示</li>
+        <li>経過時間が <b>24時間超</b> の場合、カード背景に薄い警告色を適用（対応遅延の視覚的アラート）</li>
+        <li>ドラッグ中はカードに影（<code>box-shadow</code>）を追加し、元の位置に半透明のプレースホルダーを表示</li>
+      </ul>
+
+      <h3 id="card-click">クリック時の顧客詳細遷移</h3>
+      <p>カードのクリック（ドラッグ開始と判定されない短いタップ）で <code>/crm/customers/:customerId</code> へ <code>navigate()</code> で遷移する。<b>@dnd-kit</b> の <code>PointerSensor</code> に <code>activationConstraint</code>（距離: 8px）を設定することで、クリックとドラッグを明確に区別する:</p>
+
+      <pre><code>const sensors = useSensors(
+  useSensor(PointerSensor, {
+    activationConstraint: {
+      distance: 8,  // 8px 以上の移動でドラッグ開始
+    },
+  }),
+  useSensor(KeyboardSensor, {
+    coordinateGetter: sortableKeyboardCoordinates,
+  })
+);</code></pre>
+
+      <h2 id="performance">パフォーマンス最適化</h2>
+
+      <p>カンバンビューは数百件の顧客カードを同時に表示する可能性があるため、以下のパフォーマンス最適化を実装する。</p>
+
+      <h3 id="virtual-scroll">仮想スクロール</h3>
+      <p>各カラム内のカードリストに <b>react-window</b>（または <b>@tanstack/react-virtual</b>）による<b>仮想スクロール</b>を適用する。表示領域に入ったカードのみDOMにレンダリングし、100件以上のカードがあるカラムでも60fpsを維持する。</p>
+      <ul>
+        <li>カード高さは固定（<code>estimateSize: 120px</code>）として計算を高速化</li>
+        <li>オーバースキャン（前後5件）で高速スクロール時の空白を防止</li>
+        <li>ドラッグ中は仮想化を一時的に解除し、ドロップ先の正確な位置計算を保証</li>
+      </ul>
+
+      <h3 id="memoization">メモ化（React.memo）</h3>
+      <p>不要な再レンダリングを防止するため、以下のメモ化戦略を適用する:</p>
+      <ul>
+        <li><code>KanbanColumn</code> を <code>React.memo</code> でラップし、<code>customers</code> 配列の参照が変わらない限り再レンダリングしない</li>
+        <li><code>CustomerCard</code> を <code>React.memo</code> でラップし、<code>customer</code> オブジェクトの <code>updated_at</code> が変わらない限り再レンダリングしない</li>
+        <li>ドラッグ&amp;ドロップのイベントハンドラは <code>useCallback</code> でメモ化</li>
+        <li>カラムデータのフィルタ・ソート処理は <code>useMemo</code> で計算結果をキャッシュ</li>
+      </ul>
+
+      <h3 id="realtime-update">リアルタイム更新（Firestore onSnapshot）</h3>
+      <p>カンバンデータはFirestoreの <b>onSnapshot</b> リスナーによるリアルタイム同期を行う。複数の営業担当者が同時にカンバンを操作する場面を想定し、以下の設計とする:</p>
+      <ul>
+        <li><code>crm_customers</code> コレクションに対して <code>onSnapshot</code> リスナーを設定し、他ユーザーによるフェーズ変更を即座に反映</li>
+        <li>自身の楽観的更新と外部からの更新が競合した場合は、<b>サーバー側のデータを優先</b>（last-write-wins）</li>
+        <li>更新頻度が高い場合は <b>debounce（300ms）</b> を適用し、UIのちらつきを防止</li>
+        <li>バックグラウンドタブではリスナーを <b>pause</b> し、フォアグラウンド復帰時に再同期</li>
+      </ul>
+
+      <h3 id="large-data">大量データ対応</h3>
+      <p>顧客数が増加した場合の対策:</p>
+      <ul>
+        <li><b>ページネーション</b>: 各カラムの初期表示は最大50件とし、「さらに読み込む」ボタンで追加取得</li>
+        <li><b>フィルタの活用</b>: 店舗・担当者フィルタで表示対象を絞り込み、初期ロード量を削減</li>
+        <li><b>バックグラウンドプリフェッチ</b>: 初期表示後に残りのカラムデータを非同期で取得</li>
+        <li><b>Firestoreクエリ最適化</b>: <code>where</code> + <code>orderBy</code> + <code>limit</code> を組み合わせた複合インデックスの活用</li>
+      </ul>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#component-design">カンバンコンポーネント設計</a></li>
+          <li class="toc-h3"><a href="#kanban-board">KanbanBoard（ボード層）</a></li>
+          <li class="toc-h3"><a href="#kanban-column">KanbanColumn（カラム層）</a></li>
+          <li class="toc-h3"><a href="#customer-card-component">CustomerCard（カード層）</a></li>
+          <li><a href="#drag-and-drop">ドラッグ&amp;ドロップ実装</a></li>
+          <li class="toc-h3"><a href="#library-selection">ライブラリ選定</a></li>
+          <li class="toc-h3"><a href="#dnd-event-handling">ドラッグイベントハンドリング</a></li>
+          <li class="toc-h3"><a href="#phase-transition-api">ドロップ時のフェーズ遷移API呼び出し</a></li>
+          <li><a href="#optimistic-update">楽観的UI更新</a></li>
+          <li class="toc-h3"><a href="#optimistic-flow">楽観的更新フロー</a></li>
+          <li class="toc-h3"><a href="#rollback-strategy">ロールバック戦略</a></li>
+          <li class="toc-h3"><a href="#reason-modal">遷移理由モーダル</a></li>
+          <li><a href="#column-spec">カンバンカラム仕様</a></li>
+          <li class="toc-h3"><a href="#column-list">表示カラム一覧</a></li>
+          <li class="toc-h3"><a href="#excluded-phases">除外フェーズ: lost / contracted</a></li>
+          <li class="toc-h3"><a href="#column-sort">カラム内ソート</a></li>
+          <li><a href="#customer-card-display">CustomerCardコンポーネント</a></li>
+          <li class="toc-h3"><a href="#card-display-info">カード内表示情報</a></li>
+          <li class="toc-h3"><a href="#card-click">クリック時の顧客詳細遷移</a></li>
+          <li><a href="#performance">パフォーマンス最適化</a></li>
+          <li class="toc-h3"><a href="#virtual-scroll">仮想スクロール</a></li>
+          <li class="toc-h3"><a href="#memoization">メモ化（React.memo）</a></li>
+          <li class="toc-h3"><a href="#realtime-update">リアルタイム更新</a></li>
+          <li class="toc-h3"><a href="#large-data">大量データ対応</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+          <li><a href="crm-phase-kanri.html">CRMフェーズ管理</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+        <li><a href="crm-phase-kanri.html">CRMフェーズ管理</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

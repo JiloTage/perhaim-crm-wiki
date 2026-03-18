@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>分析レポート詳細 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; <a href="crm-jissou-phase.html">CRM実装フェーズ計画</a> &gt; 分析レポート詳細
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">分析レポート詳細</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2における分析・レポート機能の詳細設計。<b>デュアルファネル</b>による全体/Per Heim経由の比較分析、<b>ROI訴求指標（RoiMetrics）</b>による効果測定、<b>ダッシュボードKPI</b>、<b>リードタイム分析</b>、<b>月次レポート</b>の自動生成、およびMVPから将来拡張に向けた<b>集計アーキテクチャ</b>の移行計画を定義する。Phase 6（分析・レポート）の実装仕様に対応する。</div>
+
+      <!-- ============================================ -->
+      <!-- デュアルファネル -->
+      <!-- ============================================ -->
+      <h2 id="dual-funnel">デュアルファネル</h2>
+      <p>CRM v3.2の分析機能の中核は、<b>全体ファネル</b>と<b>Per Heim経由ファネル</b>の<b>2系統を並列比較</b>するデュアルファネル設計にある。この設計により「Per Heimを使うと来店率がX%上がる」ことを<b>データで証明</b>でき、経営者へのROI訴求力を最大化する。</p>
+
+      <h3 id="funnel-stages">ファネルステージ定義</h3>
+      <p>各ファネルは以下の4ステージで構成される。全体ファネルとPer Heim経由ファネルでステージ名称が若干異なる点に注意する。</p>
+      <table>
+        <thead>
+          <tr><th>ステージ</th><th>全体ファネル</th><th>Per Heim経由ファネル</th><th>定義</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Stage 1</b></td>
+            <td>反響</td>
+            <td>ヒアリング依頼</td>
+            <td>顧客からの初回接触。全体は全チャネル（SUUMO、HOME'S、直接問合せ等）、Per Heim経由はAIヒアリング依頼を起点とする</td>
+          </tr>
+          <tr>
+            <td><b>Stage 2</b></td>
+            <td>ヒアリング中</td>
+            <td>ヒアリング完了</td>
+            <td>顧客ニーズの把握フェーズ。Per Heim経由はAIヒアリング完了（自動遷移）を基準とする</td>
+          </tr>
+          <tr>
+            <td><b>Stage 3</b></td>
+            <td>来店予約</td>
+            <td>来店予約</td>
+            <td>物件見学または相談のための来店予約。<b>来店率</b>の算出基準となるステージ</td>
+          </tr>
+          <tr>
+            <td><b>Stage 4</b></td>
+            <td>成約</td>
+            <td>成約</td>
+            <td>契約締結。最終コンバージョン</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="funnel-example">ファネル比較例</h3>
+      <table>
+        <thead>
+          <tr><th>ステージ</th><th>全体ファネル</th><th>Per Heim経由ファネル</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>反響 / ヒアリング依頼</td><td>45件</td><td>20件</td></tr>
+          <tr><td>ヒアリング中 / 完了</td><td>20件</td><td>15件</td></tr>
+          <tr><td>来店予約</td><td>8件（来店率 <b>17.8%</b>）</td><td>7件（来店率 <b>35.0%</b>）</td></tr>
+          <tr><td>成約</td><td>3件（成約率 <b>6.7%</b>）</td><td>3件（成約率 <b>15.0%</b>）</td></tr>
+        </tbody>
+      </table>
+      <p>Per Heim経由の来店率は全体の約<b>2倍</b>（35.0% vs 17.8%）であり、AIヒアリングによる顧客ニーズの事前把握が来店意欲を大幅に向上させることを定量的に示している。</p>
+
+      <h3 id="funnel-visualization">可視化仕様</h3>
+      <p>ファネルデータは <a href="crm-api-sekkei.html">CRM API設計</a> の分析APIエンドポイント <code>GET /v1/tenant/crm/analytics/funnel</code> から取得する。クエリパラメータ <code>compare_perheim=true</code> を指定することで、2系統のファネルデータが同時に返却される。</p>
+      <ul>
+        <li><b>表示形式</b>: 2カラムの逆三角形ファネルチャート（左: 全体、右: Per Heim経由）</li>
+        <li><b>色分け</b>: 全体ファネルは青系グラデーション、Per Heim経由は緑系グラデーション</li>
+        <li><b>遷移率</b>: 各ステージ間の遷移率をパーセンテージで表示</li>
+        <li><b>期間フィルタ</b>: 7日 / 30日 / 90日 の切替に対応</li>
+      </ul>
+
+      <div class="mermaid-container"><pre class="mermaid">
+graph TB
+    subgraph Overall["全体ファネル"]
+        O1["反響<br/>45件<br/>━━━━━━━━━━━━"]
+        O2["ヒアリング中<br/>20件 (44.4%)<br/>━━━━━━━"]
+        O3["来店予約<br/>8件 (来店率 17.8%)<br/>━━━"]
+        O4["成約<br/>3件 (成約率 6.7%)<br/>━"]
+    end
+
+    subgraph PerHeim["Per Heim経由ファネル"]
+        P1["ヒアリング依頼<br/>20件<br/>━━━━━━━━━━━━"]
+        P2["ヒアリング完了<br/>15件 (75.0%)<br/>━━━━━━━━━"]
+        P3["来店予約<br/>7件 (来店率 35.0%)<br/>━━━━━"]
+        P4["成約<br/>3件 (成約率 15.0%)<br/>━━"]
+    end
+
+    O1 --> O2 --> O3 --> O4
+    P1 --> P2 --> P3 --> P4
+
+    style Overall fill:#e3f2fd,stroke:#2196f3
+    style PerHeim fill:#e8f5e9,stroke:#4caf50
+      </pre></div>
+
+      <!-- ============================================ -->
+      <!-- ROI訴求指標 -->
+      <!-- ============================================ -->
+      <h2 id="roi-metrics">ROI訴求指標（RoiMetrics）</h2>
+      <p><b>RoiMetrics</b>モデルは、Per Heim経由と非Per Heim経由の顧客行動を定量的に比較し、AIヒアリングの<b>投資対効果</b>を経営者に訴求するための指標セットである。月次ベースで集計し、改善トレンドの追跡を可能にする。</p>
+
+      <h3 id="roi-compare">Per Heim経由 vs 非経由の比較指標</h3>
+      <table>
+        <thead>
+          <tr><th>指標カテゴリ</th><th>Per Heim経由フィールド</th><th>非Per Heimフィールド</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>反響数</b></td>
+            <td><code>perheim_inquiry_count</code></td>
+            <td><code>non_perheim_inquiry_count</code></td>
+            <td>当該期間の新規反響件数</td>
+          </tr>
+          <tr>
+            <td><b>来店率</b></td>
+            <td><code>perheim_visit_rate</code></td>
+            <td><code>non_perheim_visit_rate</code></td>
+            <td>反響→来店予約の遷移率（%）</td>
+          </tr>
+          <tr>
+            <td><b>成約率</b></td>
+            <td><code>perheim_contract_rate</code></td>
+            <td><code>non_perheim_contract_rate</code></td>
+            <td>反響→成約の遷移率（%）</td>
+          </tr>
+          <tr>
+            <td><b>平均リードタイム</b></td>
+            <td><code>perheim_avg_lead_time_days</code></td>
+            <td><code>non_perheim_avg_lead_time_days</code></td>
+            <td>反響から成約までの平均日数</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="roi-model">RoiMetricsモデル定義</h3>
+      <p><code>RoiMetrics</code>はPydantic BaseModelとして定義され、以下の差分指標フィールドを自動算出する。</p>
+      <table>
+        <thead>
+          <tr><th>差分フィールド</th><th>型</th><th>算出ロジック</th><th>意味</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>visit_rate_improvement</code></td>
+            <td><code>float</code></td>
+            <td><code>perheim_visit_rate - non_perheim_visit_rate</code></td>
+            <td>来店率改善ポイント（例: +17.2pt）</td>
+          </tr>
+          <tr>
+            <td><code>contract_rate_improvement</code></td>
+            <td><code>float</code></td>
+            <td><code>perheim_contract_rate - non_perheim_contract_rate</code></td>
+            <td>成約率改善ポイント</td>
+          </tr>
+          <tr>
+            <td><code>lead_time_reduction_days</code></td>
+            <td><code>float</code></td>
+            <td><code>non_perheim_avg_lead_time_days - perheim_avg_lead_time_days</code></td>
+            <td>リードタイム短縮日数（正値=Per Heimが速い）</td>
+          </tr>
+        </tbody>
+      </table>
+      <p><code>period</code>フィールド（例: <code>"2026-03"</code>）により月次単位での比較データを管理する。過去データとの比較により、Per Heimの効果が時間とともにどう推移するかの<b>トレンド分析</b>も可能となる。</p>
+
+      <!-- ============================================ -->
+      <!-- ダッシュボードKPI -->
+      <!-- ============================================ -->
+      <h2 id="dashboard-kpi">ダッシュボードKPI</h2>
+      <p>CRMダッシュボードのトップには、営業チームが日々確認すべき<b>6つのKPI指標</b>を配置する。データは <code>GET /v1/tenant/crm/analytics/dashboard</code> エンドポイントから取得し、<b>7日 / 30日 / 90日</b>の期間切替に対応する。</p>
+
+      <table>
+        <thead>
+          <tr><th>KPI</th><th>フィールド名</th><th>型</th><th>定義</th><th>用途</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>総顧客数</b></td>
+            <td><code>total_customers</code></td>
+            <td><code>int</code></td>
+            <td>CRM内の全顧客レコード数（アクティブ+失注含む）</td>
+            <td>CRM全体の規模把握</td>
+          </tr>
+          <tr>
+            <td><b>新規反響数</b></td>
+            <td><code>new_inquiries</code></td>
+            <td><code>int</code></td>
+            <td>指定期間内に受信した新規反響件数</td>
+            <td>マーケティング効果の指標</td>
+          </tr>
+          <tr>
+            <td><b>ヒアリング完了率</b></td>
+            <td><code>hearing_completion_rate</code></td>
+            <td><code>float</code></td>
+            <td>ヒアリング依頼のうち完了した割合（%）</td>
+            <td>AIヒアリングの稼働状況</td>
+          </tr>
+          <tr>
+            <td><b>来店率</b></td>
+            <td><code>visit_rate</code></td>
+            <td><code>float</code></td>
+            <td>反響から来店予約に至った割合（%）</td>
+            <td>追客効果の指標</td>
+          </tr>
+          <tr>
+            <td><b>成約率</b></td>
+            <td><code>contract_rate</code></td>
+            <td><code>float</code></td>
+            <td>反響から成約に至った割合（%）</td>
+            <td>営業パフォーマンスの指標</td>
+          </tr>
+          <tr>
+            <td><b>平均リードタイム</b></td>
+            <td><code>avg_lead_time_days</code></td>
+            <td><code>dict[str, float]</code></td>
+            <td>フェーズ間遷移の平均日数（辞書形式で各遷移ペアを保持）</td>
+            <td>営業プロセスの速度指標</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>各KPIカードには<b>前期比の増減</b>（矢印アイコン+増減率）を併記し、改善/悪化のトレンドを一目で把握できるようにする。</p>
+
+      <!-- ============================================ -->
+      <!-- リードタイム分析 -->
+      <!-- ============================================ -->
+      <h2 id="lead-time">リードタイム分析</h2>
+      <p><b>リードタイム分析</b>は、顧客が各<a href="crm-phase-kanri.html">フェーズ</a>間を遷移するのに要した<b>平均日数</b>を算出し、営業プロセスの<b>ボトルネック</b>を特定するための機能である。データは <code>GET /v1/tenant/crm/analytics/lead-time</code> から取得する。</p>
+
+      <h3 id="lead-time-calc">平均日数の算出</h3>
+      <p>レスポンスは <code>phase_transitions</code> 配列として返却され、各要素は以下の構造を持つ。</p>
+      <table>
+        <thead>
+          <tr><th>フィールド</th><th>型</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>from_phase</code></td><td><code>str</code></td><td>遷移元フェーズ（例: <code>"inquiry"</code>）</td></tr>
+          <tr><td><code>to_phase</code></td><td><code>str</code></td><td>遷移先フェーズ（例: <code>"hearing_done"</code>）</td></tr>
+          <tr><td><code>avg_days</code></td><td><code>float</code></td><td>遷移に要した平均日数</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="bottleneck">ボトルネック検出</h3>
+      <p>リードタイムデータをもとに、以下のルールでボトルネックを自動検出する。</p>
+      <ul>
+        <li><b>閾値超過</b>: 特定のフェーズ遷移の平均日数が業界ベンチマーク（例: 反響→来店で14日以上）を超えた場合にアラート表示</li>
+        <li><b>前月比悪化</b>: 前月と比較してリードタイムが20%以上延長した遷移をハイライト</li>
+        <li><b>Per Heim比較</b>: Per Heim経由のリードタイムと非経由のリードタイムを比較し、AIヒアリングによる短縮効果を可視化</li>
+      </ul>
+
+      <h3 id="improvement-suggest">改善提案</h3>
+      <p>ボトルネックが検出されたフェーズ遷移に対して、システムは以下の改善提案を自動表示する。</p>
+      <ul>
+        <li><b>反響→ヒアリング</b>が長い場合: 「初回連絡の自動化（サンクスメール+LINE通知）を検討してください」</li>
+        <li><b>ヒアリング→来店</b>が長い場合: 「来店促進テンプレートの活用、またはPer Heimヒアリングの導入を検討してください」</li>
+        <li><b>来店→成約</b>が長い場合: 「追客コミュニケーションの頻度を見直してください」</li>
+      </ul>
+
+      <!-- ============================================ -->
+      <!-- 月次レポート -->
+      <!-- ============================================ -->
+      <h2 id="monthly-report">月次レポート</h2>
+      <p><b>月次レポート</b>は、毎月1日に<b>Cloud Scheduler</b>がトリガーする自動生成レポートである。経営者向けのサマリーと現場向けの詳細データの両方を含む構成とする。データは <code>GET /v1/tenant/crm/analytics/monthly-report?month=YYYYMM</code> から取得可能。</p>
+
+      <h3 id="report-structure">レポート構成要素</h3>
+      <table>
+        <thead>
+          <tr><th>セクション</th><th>内容</th><th>対象</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>エグゼクティブサマリー</b></td>
+            <td>月次KPI概要、前月比、目標達成率</td>
+            <td>経営者</td>
+          </tr>
+          <tr>
+            <td><b>デュアルファネル</b></td>
+            <td>全体 vs Per Heim経由の月次ファネル比較</td>
+            <td>経営者</td>
+          </tr>
+          <tr>
+            <td><b>ROI指標</b></td>
+            <td>RoiMetricsの月次推移、Per Heim効果の定量データ</td>
+            <td>経営者</td>
+          </tr>
+          <tr>
+            <td><b>営業パフォーマンス</b></td>
+            <td>担当者別成約数、対応速度、タスク完了率</td>
+            <td>マネージャー</td>
+          </tr>
+          <tr>
+            <td><b>リードタイム分析</b></td>
+            <td>フェーズ別平均日数、ボトルネック、改善提案</td>
+            <td>マネージャー</td>
+          </tr>
+          <tr>
+            <td><b>反響チャネル分析</b></td>
+            <td>SUUMO/HOME'S/直接問合せの比率、チャネル別成約率</td>
+            <td>マーケティング</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="report-output">出力仕様</h3>
+      <ul>
+        <li><b>PDF出力</b>: 経営者・マネージャー向け。ファネルチャート、KPIグラフをビジュアルに含む。Cloud Run上でレンダリングし、Firestore Storageに保存</li>
+        <li><b>CSV出力</b>: データ分析向け。全KPIの生データ、顧客別フェーズ遷移履歴、担当者別パフォーマンスデータをエクスポート可能</li>
+        <li><b>配信</b>: 毎月1日の <code>monthly_report</code> Cloud Schedulerジョブにより自動生成し、管理者・マネージャーにメールで配信</li>
+      </ul>
+
+      <!-- ============================================ -->
+      <!-- 集計アーキテクチャ -->
+      <!-- ============================================ -->
+      <h2 id="shukei-architecture">集計アーキテクチャ</h2>
+      <p>分析データの集計方式は、<b>MVP段階</b>のリアルタイム集計から<b>将来拡張</b>のバッチ集計へ段階的に移行する設計とする。データ量が増加しても<a href="crm-api-sekkei.html">API応答時間200ms以内</a>の非機能要件を維持するための戦略である。</p>
+
+      <h3 id="mvp-realtime">MVP段階: リアルタイム集計</h3>
+      <p>MVP段階ではテナントあたりの顧客数が少ない（想定: 数百件以下）ため、<b>Firestoreクエリで毎回算出</b>する方式を採用する。</p>
+      <ul>
+        <li><b>集計方式</b>: APIリクエスト時にFirestoreの <code>crm_customers</code> / <code>crm_timeline</code> コレクションに対してクエリを実行</li>
+        <li><b>メリット</b>: 実装コストが低い、データの即時反映、バッチ処理の運用不要</li>
+        <li><b>制約</b>: 顧客数1,000件超でレスポンスタイム200ms超過のリスク</li>
+        <li><b>Firestoreインデックス</b>: <a href="crm-jissou-phase.html">CRM実装フェーズ計画</a>で定義した複合インデックスを活用</li>
+      </ul>
+
+      <h3 id="future-batch">将来拡張: バッチ集計</h3>
+      <p>顧客数の増加に伴い、<code>crm_analytics/{tenant_id}/monthly/{yyyymm}</code> コレクションに<b>日次バッチ</b>で集計済みデータを保存する方式へ移行する。</p>
+      <ul>
+        <li><b>集計タイミング</b>: Cloud Schedulerが毎日深夜（03:00 JST）に集計ジョブをトリガー</li>
+        <li><b>保存先</b>: <code>crm_analytics/{tenant_id}/monthly/{yyyymm}</code> ドキュメントにKPI・ファネル・リードタイム等の集計済み値を保存</li>
+        <li><b>API側の変更</b>: 集計済みデータが存在する場合はそちらを参照し、なければリアルタイム集計にフォールバック</li>
+        <li><b>移行トリガー</b>: テナントの顧客数が1,000件を超えた時点で自動的にバッチ集計モードに切り替え</li>
+      </ul>
+
+      <div class="mermaid-container"><pre class="mermaid">
+graph TB
+    subgraph MVP["MVP段階: リアルタイム集計"]
+        REQ1["API リクエスト<br/>(dashboard/funnel/lead-time)"]
+        FS1["Firestore<br/>crm_customers<br/>crm_timeline"]
+        CALC1["リアルタイム算出"]
+        RES1["レスポンス<br/>(&lt;200ms)"]
+
+        REQ1 --> FS1
+        FS1 --> CALC1
+        CALC1 --> RES1
+    end
+
+    subgraph Future["将来: バッチ集計"]
+        SCHED["Cloud Scheduler<br/>毎日 03:00 JST"]
+        BATCH["バッチ集計ジョブ<br/>(Cloud Run)"]
+        FS2["Firestore<br/>crm_customers<br/>crm_timeline"]
+        ANALYTICS["crm_analytics<br/>/{tenant_id}/monthly/{yyyymm}"]
+        REQ2["API リクエスト"]
+        CHECK["集計済みデータ<br/>存在チェック"]
+        RES2["レスポンス<br/>(&lt;50ms)"]
+
+        SCHED --> BATCH
+        BATCH --> FS2
+        FS2 --> BATCH
+        BATCH -->|集計結果保存| ANALYTICS
+        REQ2 --> CHECK
+        CHECK -->|あり| ANALYTICS
+        ANALYTICS --> RES2
+        CHECK -->|なし: フォールバック| FS2
+    end
+
+    MVP -.->|顧客数 &gt; 1,000件<br/>で移行| Future
+
+    style MVP fill:#e3f2fd,stroke:#2196f3
+    style Future fill:#e8f5e9,stroke:#4caf50
+      </pre></div>
+
+      <h3 id="migration-plan">移行計画</h3>
+      <table>
+        <thead>
+          <tr><th>段階</th><th>条件</th><th>集計方式</th><th>API応答時間（目安）</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>MVP</b></td>
+            <td>顧客数 &lt; 1,000件</td>
+            <td>Firestoreリアルタイムクエリ</td>
+            <td>100〜200ms</td>
+          </tr>
+          <tr>
+            <td><b>中間</b></td>
+            <td>顧客数 1,000〜10,000件</td>
+            <td>日次バッチ集計 + リアルタイムフォールバック</td>
+            <td>30〜50ms（集計済み）/ 200ms+（フォールバック）</td>
+          </tr>
+          <tr>
+            <td><b>大規模</b></td>
+            <td>顧客数 &gt; 10,000件</td>
+            <td>完全バッチ集計 + キャッシュ</td>
+            <td>&lt; 30ms</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>集計アーキテクチャ全体は <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> の非機能要件（パフォーマンス基準: API応答200ms以内）を満たすように設計されている。Phase 6の実装スコープと依存関係については <a href="crm-jissou-phase.html">CRM実装フェーズ計画</a> を参照。</p>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#dual-funnel">デュアルファネル</a></li>
+          <li class="toc-h3"><a href="#funnel-stages">ファネルステージ定義</a></li>
+          <li class="toc-h3"><a href="#funnel-example">ファネル比較例</a></li>
+          <li class="toc-h3"><a href="#funnel-visualization">可視化仕様</a></li>
+          <li><a href="#roi-metrics">ROI訴求指標（RoiMetrics）</a></li>
+          <li class="toc-h3"><a href="#roi-compare">Per Heim経由 vs 非経由の比較指標</a></li>
+          <li class="toc-h3"><a href="#roi-model">RoiMetricsモデル定義</a></li>
+          <li><a href="#dashboard-kpi">ダッシュボードKPI</a></li>
+          <li><a href="#lead-time">リードタイム分析</a></li>
+          <li class="toc-h3"><a href="#lead-time-calc">平均日数の算出</a></li>
+          <li class="toc-h3"><a href="#bottleneck">ボトルネック検出</a></li>
+          <li class="toc-h3"><a href="#improvement-suggest">改善提案</a></li>
+          <li><a href="#monthly-report">月次レポート</a></li>
+          <li class="toc-h3"><a href="#report-structure">レポート構成要素</a></li>
+          <li class="toc-h3"><a href="#report-output">出力仕様</a></li>
+          <li><a href="#shukei-architecture">集計アーキテクチャ</a></li>
+          <li class="toc-h3"><a href="#mvp-realtime">MVP段階: リアルタイム集計</a></li>
+          <li class="toc-h3"><a href="#future-batch">将来拡張: バッチ集計</a></li>
+          <li class="toc-h3"><a href="#migration-plan">移行計画</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-jissou-phase.html">CRM実装フェーズ計画</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+          <li><a href="crm-phase-kanri.html">フェーズ管理詳細</a></li>
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-jissou-phase.html">CRM実装フェーズ計画</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        <li><a href="crm-phase-kanri.html">フェーズ管理詳細</a></li>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-jissou-phase.html">CRM実装フェーズ計画</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

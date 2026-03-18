@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Webhook設計詳細 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; <a href="crm-api-sekkei.html">CRM API設計</a> &gt; Webhook設計詳細
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">Webhook設計詳細</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2における<b>Webhook受信エンドポイント</b>の詳細設計。不動産ポータルサイト（SUUMO・HOME'S等）からの<b>反響メール転送Webhook</b>、<b>LINE Messaging API Webhook</b>、<b>ヒアリング完了通知</b>、<b>カレンダーイベント通知</b>の4種のWebhookについて、リクエスト/レスポンス仕様・<b>認証・署名検証</b>・<b>メールパーサー</b>・<b>リトライポリシー</b>・<b>セキュリティ</b>を定義する。</div>
+
+      <!-- ===== 導入 ===== -->
+      <p><b>Webhook設計詳細</b>は、<a href="crm-api-sekkei.html">CRM API設計</a>で概要を示した<b>Webhookエンドポイント群</b>の完全な実装仕様書である。Per Heim CRMでは、外部サービスからのイベント通知を<b>Webhook</b>として受信し、CRMデータへ自動変換する仕組みを採用している。<a href="crm-gaibu-renkei.html">外部連携設計</a>で定義されたLINE Messaging API連携・Gmail反響取込の各フローにおいて、本設計のWebhookが<b>データ取込の入口</b>として機能する。</p>
+      <p>すべてのWebhookは<b>セッション認証ではなくWebhook Secret</b>（またはプラットフォーム固有の署名検証）で認証され、<b>冪等性</b>を保証し、<b>デッドレターキュー</b>によるエラーハンドリングを備える。本設計は<a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a>のPhase 4（外部連携）に位置づけられる。</p>
+
+      <!-- ===== Mermaid: Webhook処理全体フロー ===== -->
+      <div class="mermaid-container"><pre class="mermaid">
+sequenceDiagram
+    participant Portal as 不動産ポータル/LINE/Calendar
+    participant GW as API Gateway
+    participant Auth as Webhook認証
+    participant Handler as Webhookハンドラ
+    participant Parser as メールパーサー
+    participant DB as Firestore
+    participant DLQ as デッドレターキュー
+    participant Monitor as 監視・アラート
+
+    Portal->>GW: POST /v1/webhook/*
+    GW->>Auth: 署名検証 / Secret検証
+    alt 認証失敗
+        Auth-->>Portal: 401 Unauthorized
+        Auth->>Monitor: 認証失敗アラート
+    end
+    Auth->>Handler: 認証済みリクエスト
+    Handler->>Handler: 冪等性チェック（idempotency_key）
+
+    alt 反響メール
+        Handler->>Parser: raw_email パース
+        alt パース成功
+            Parser->>DB: inquiry レコード作成
+        else パース失敗
+            Parser->>DB: status: manual_review で保存
+        end
+    else LINE / Calendar
+        Handler->>DB: イベント記録
+    end
+
+    alt 処理失敗
+        Handler->>DLQ: 失敗メッセージをキューイング
+        DLQ->>Monitor: DLQ滞留アラート
+    end
+
+    Handler-->>Portal: 200 OK / エラーレスポンス
+      </pre></div>
+
+      <!-- ===== H2: Webhookエンドポイント一覧 ===== -->
+      <h2 id="webhook-endpoints">Webhookエンドポイント一覧</h2>
+      <p>Per Heim CRMは以下の<b>4種のWebhookエンドポイント</b>を提供する。すべてのエンドポイントは <code>/v1/webhook/</code> プレフィックス配下に配置され、CRM APIとは異なる<b>認証方式</b>（Webhook Secret / プラットフォーム署名検証）を採用する。</p>
+
+      <table>
+        <thead>
+          <tr><th>エンドポイント</th><th>用途</th><th>送信元</th><th>認証方式</th><th>優先度</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>POST /v1/webhook/inquiry-email</code></td>
+            <td>反響メール転送受信</td>
+            <td>メール転送サービス / Gmail API</td>
+            <td>Webhook Secret（HMAC-SHA256）</td>
+            <td>Phase 4 MVP</td>
+          </tr>
+          <tr>
+            <td><code>POST /v1/webhook/line-message</code></td>
+            <td>LINE受信メッセージ通知</td>
+            <td>LINE Messaging API</td>
+            <td>X-Line-Signature（HMAC-SHA256）</td>
+            <td>Phase 4</td>
+          </tr>
+          <tr>
+            <td><code>POST /v1/webhook/hearing-complete</code></td>
+            <td>AIヒアリング完了通知</td>
+            <td>Per Heim AIヒアリングシステム</td>
+            <td>内部Webhook Secret</td>
+            <td>Phase 3</td>
+          </tr>
+          <tr>
+            <td><code>POST /v1/webhook/calendar-event</code></td>
+            <td>カレンダーイベント変更通知</td>
+            <td>Google Calendar API（Pub/Sub）</td>
+            <td>Google Pub/Sub トークン検証</td>
+            <td>Phase 5</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>各エンドポイントの共通仕様:</p>
+      <ul>
+        <li><b>Content-Type</b>: <code>application/json</code></li>
+        <li><b>レスポンス形式</b>: 成功時は <code>200 OK</code>、認証失敗時は <code>401 Unauthorized</code>、バリデーション失敗時は <code>400 Bad Request</code></li>
+        <li><b>タイムアウト</b>: 30秒以内にレスポンスを返却。重い処理は非同期キューに委譲</li>
+        <li><b>冪等性</b>: すべてのWebhookは <code>idempotency_key</code> による重複排除を実装</li>
+      </ul>
+
+      <!-- ===== H2: 反響メール転送Webhook ===== -->
+      <h2 id="inquiry-email-webhook">反響メール転送Webhook</h2>
+      <p>反響メール転送Webhookは、不動産ポータルサイト（<b>SUUMO</b>・<b>HOME'S</b>・<b>at home</b>等）からの反響メールを受信し、CRMの<b>反響レコード</b>（<code>crm_inquiries</code>）に自動変換するエンドポイントである。<a href="crm-gaibu-renkei.html">外部連携設計</a>で定義されたGmail反響取込フローの受信口として機能する。</p>
+
+      <h3 id="inquiry-email-spec">エンドポイント仕様</h3>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>内容</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>メソッド</td><td><code>POST</code></td></tr>
+          <tr><td>パス</td><td><code>/v1/webhook/inquiry-email</code></td></tr>
+          <tr><td>認証</td><td>リクエストヘッダ <code>X-Webhook-Signature</code> にHMAC-SHA256署名を付与</td></tr>
+          <tr><td>Content-Type</td><td><code>application/json</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="inquiry-email-request">リクエスト形式</h3>
+      <pre><code>{
+  "raw_email": "From: suumo-noreply@...\nTo: ...\nSubject: ...\n\n本文...",
+  "source": "suumo",
+  "received_at": "2026-03-18T10:30:00Z",
+  "idempotency_key": "msg_abc123def456"
+}</code></pre>
+      <ul>
+        <li><code>raw_email</code>（必須・string）: メールの生データ（ヘッダ + 本文）</li>
+        <li><code>source</code>（必須・string）: メール送信元識別子（<code>suumo</code>, <code>homes</code>, <code>athome</code>, <code>unknown</code>）</li>
+        <li><code>received_at</code>（任意・ISO 8601）: メール受信日時。省略時はサーバ受信時刻</li>
+        <li><code>idempotency_key</code>（必須・string）: 冪等性保証用キー。Gmail Message-IDを推奨</li>
+      </ul>
+
+      <h3 id="inquiry-email-response">レスポンス形式</h3>
+      <p><b>成功時（200 OK）</b>:</p>
+      <pre><code>{
+  "inquiry_id": "inq_20260318_abc123",
+  "status": "new",
+  "parsed": true,
+  "customer_name": "山田太郎",
+  "source": "suumo"
+}</code></pre>
+
+      <p><b>パース失敗時（200 OK）</b>:</p>
+      <pre><code>{
+  "inquiry_id": "inq_20260318_def456",
+  "status": "manual_review",
+  "parsed": false,
+  "parse_error": "unknown_format",
+  "source": "unknown"
+}</code></pre>
+
+      <p><b>認証失敗時（401 Unauthorized）</b>:</p>
+      <pre><code>{
+  "error": {
+    "code": "WEBHOOK_AUTH_FAILED",
+    "message": "Invalid webhook signature"
+  }
+}</code></pre>
+
+      <h3 id="inquiry-email-auth">Webhook Secret認証</h3>
+      <p>リクエストの正当性を検証するため、<b>HMAC-SHA256署名</b>を使用する:</p>
+      <ol>
+        <li>テナント設定画面で<b>Webhook Secret</b>を生成・登録する</li>
+        <li>送信側はリクエストボディ全体をWebhook SecretでHMAC-SHA256署名し、<code>X-Webhook-Signature</code> ヘッダに <code>sha256=&lt;hex_digest&gt;</code> 形式で付与する</li>
+        <li>受信側は同じSecretでリクエストボディのHMACを計算し、ヘッダの値と<b>タイミングセーフ比較</b>で一致を検証する</li>
+      </ol>
+      <pre><code># 署名検証の疑似コード
+import hmac, hashlib
+
+def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
+    expected = "sha256=" + hmac.new(
+        secret.encode(), payload, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)</code></pre>
+
+      <!-- ===== H2: メールパーサー仕様 ===== -->
+      <h2 id="email-parser">メールパーサー仕様</h2>
+      <p>反響メール転送Webhookで受信した <code>raw_email</code> は、<b>ポータルサイト別パーサー</b>によって構造化データに変換される。パーサーは <code>crm/inquiry.py</code> に実装され、<b>正規表現パターンマッチ</b>で各フィールドを抽出する。</p>
+
+      <h3 id="parser-suumo">SUUMO形式</h3>
+      <p>SUUMOからの反響メールは以下の構造を持つ:</p>
+      <table>
+        <thead>
+          <tr><th>抽出項目</th><th>正規表現パターン</th><th>必須</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>顧客名</td><td><code>お名前[：:]\s*(.+)</code></td><td>Yes</td></tr>
+          <tr><td>電話番号</td><td><code>電話番号[：:]\s*([\d\-]+)</code></td><td>No</td></tr>
+          <tr><td>メールアドレス</td><td><code>メール[：:]\s*([\w\.\-]+@[\w\.\-]+)</code></td><td>No</td></tr>
+          <tr><td>問い合わせ物件</td><td><code>物件名[：:]\s*(.+)</code></td><td>No</td></tr>
+          <tr><td>メッセージ</td><td><code>お問い合わせ内容[：:]\s*([\s\S]+?)(?=---|\z)</code></td><td>No</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="parser-homes">HOME'S形式</h3>
+      <p>HOME'Sからの反響メールは表形式のレイアウトを使用する:</p>
+      <table>
+        <thead>
+          <tr><th>抽出項目</th><th>正規表現パターン</th><th>必須</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>顧客名</td><td><code>【お客様名】\s*(.+)</code></td><td>Yes</td></tr>
+          <tr><td>電話番号</td><td><code>【電話番号】\s*([\d\-]+)</code></td><td>No</td></tr>
+          <tr><td>メールアドレス</td><td><code>【メールアドレス】\s*([\w\.\-]+@[\w\.\-]+)</code></td><td>No</td></tr>
+          <tr><td>問い合わせ物件</td><td><code>【物件名】\s*(.+)</code></td><td>No</td></tr>
+          <tr><td>メッセージ</td><td><code>【問い合わせ内容】\s*([\s\S]+?)(?=【|\z)</code></td><td>No</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="parser-flow">パース処理フロー</h3>
+      <ol>
+        <li><code>source</code> フィールドに基づき対応するパーサーを選択</li>
+        <li><code>source</code> が <code>unknown</code> の場合、メール本文の特徴から自動判別を試みる</li>
+        <li>各パーサーが正規表現パターンマッチで項目を抽出</li>
+        <li><b>顧客名</b>の抽出に失敗した場合、パース失敗と判定</li>
+        <li>電話番号・メールアドレスは正規化処理（ハイフン除去、全角→半角変換）を適用</li>
+      </ol>
+
+      <h3 id="parser-fallback">パース失敗時のフォールバック</h3>
+      <p>パーサーが必須項目の抽出に失敗した場合、以下の<b>manual_reviewフォールバック</b>が発動する:</p>
+      <ul>
+        <li>反響レコードを <code>status: "manual_review"</code> で作成</li>
+        <li><code>raw_email</code> をそのまま保存し、担当者が手動で確認・入力できるようにする</li>
+        <li>CRM受信トレイ画面に<b>「要手動確認」バッジ</b>を表示</li>
+        <li>担当者への<b>通知</b>（Slack / メール）を送信</li>
+        <li>パース失敗率が閾値（10%）を超えた場合、<b>パーサー改善アラート</b>を発報</li>
+      </ul>
+
+      <!-- ===== H2: LINE Webhook ===== -->
+      <h2 id="line-webhook">LINE Webhook</h2>
+      <p>LINE WebhookはLINE Messaging APIからの<b>受信メッセージ通知</b>を処理するエンドポイントである。<a href="crm-gaibu-renkei.html">外部連携設計</a>のLINE連携フローに従い、テナントごとに設定されたLINE公式アカウントからのWebhookイベントを受信する。</p>
+
+      <h3 id="line-spec">エンドポイント仕様</h3>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>内容</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>メソッド</td><td><code>POST</code></td></tr>
+          <tr><td>パス</td><td><code>/v1/webhook/line-message?tenant_id={tenant_id}</code></td></tr>
+          <tr><td>認証</td><td><code>X-Line-Signature</code> ヘッダによるHMAC-SHA256署名検証</td></tr>
+          <tr><td>Content-Type</td><td><code>application/json</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="line-request">リクエスト形式</h3>
+      <p>LINE Messaging APIから送信される標準的なWebhookイベント形式:</p>
+      <pre><code>{
+  "destination": "Uxxxxxxxxxxxx",
+  "events": [
+    {
+      "type": "message",
+      "message": {
+        "type": "text",
+        "id": "468XXXXXX",
+        "text": "物件について問い合わせたいです"
+      },
+      "source": {
+        "type": "user",
+        "userId": "U1234567890abcdef"
+      },
+      "replyToken": "nHuyWi...",
+      "timestamp": 1711111111111
+    }
+  ]
+}</code></pre>
+
+      <h3 id="line-signature">署名検証（X-Line-Signature）</h3>
+      <p>LINE Webhookの認証にはLINE独自の署名検証を使用する:</p>
+      <ol>
+        <li><code>tenant_id</code> クエリパラメータからテナントを特定</li>
+        <li>テナント設定から<b>Channel Secret</b>を取得</li>
+        <li>リクエストボディ全体をChannel SecretでHMAC-SHA256署名し、Base64エンコード</li>
+        <li><code>X-Line-Signature</code> ヘッダの値とタイミングセーフ比較で検証</li>
+      </ol>
+      <pre><code># LINE署名検証の疑似コード
+import hmac, hashlib, base64
+
+def verify_line_signature(body: bytes, signature: str, channel_secret: str) -> bool:
+    expected = base64.b64encode(
+        hmac.new(channel_secret.encode(), body, hashlib.sha256).digest()
+    ).decode()
+    return hmac.compare_digest(expected, signature)</code></pre>
+
+      <h3 id="line-message-types">メッセージ種別ハンドリング</h3>
+      <table>
+        <thead>
+          <tr><th>イベントタイプ</th><th>メッセージ種別</th><th>処理内容</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>message</code></td><td><code>text</code></td><td>テキスト本文を <code>crm_communications</code> に記録。<code>line_user_id</code> → <code>customer_id</code> マッピングで顧客特定</td></tr>
+          <tr><td><code>message</code></td><td><code>image</code></td><td>画像URLを保存。Content APIで画像データ取得しCloud Storageに保管</td></tr>
+          <tr><td><code>message</code></td><td><code>sticker</code></td><td>スタンプ情報を記録（パッケージID + スタンプID）</td></tr>
+          <tr><td><code>message</code></td><td><code>file</code></td><td>ファイルURLを保存。Content APIで取得しCloud Storageに保管</td></tr>
+          <tr><td><code>follow</code></td><td>-</td><td>友だち追加イベント。新規 <code>line_user_id</code> を記録、既存顧客とのマッチングを試行</td></tr>
+          <tr><td><code>unfollow</code></td><td>-</td><td>ブロックイベント。顧客の <code>line_status</code> を <code>blocked</code> に更新</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="line-customer-mapping">顧客マッピング</h3>
+      <p><code>line_user_id</code> から CRM顧客への紐づけフロー:</p>
+      <ol>
+        <li><code>line_user_id</code> → <code>customer_id</code> マッピングテーブルを検索</li>
+        <li>マッチあり → 該当顧客のコミュニケーション記録に追加</li>
+        <li>マッチなし → <b>未紐づけメッセージ</b>として <code>crm_communications</code> に保存。CRM画面で担当者が手動紐づけ</li>
+      </ol>
+      <p>1つのLINE公式アカウントを<b>複数店舗で共有</b>するケースにも対応するため、マッピングテーブルには <code>tenant_id</code> + <code>line_user_id</code> をキーとして管理する。</p>
+
+      <!-- ===== H2: リトライ・エラーハンドリング ===== -->
+      <h2 id="retry-error-handling">リトライ・エラーハンドリング</h2>
+      <p>Webhook処理の信頼性を担保するため、<b>冪等性保証</b>・<b>リトライポリシー</b>・<b>デッドレターキュー</b>の3層構造でエラーハンドリングを実装する。</p>
+
+      <h3 id="idempotency">冪等性保証</h3>
+      <p>すべてのWebhookリクエストは<b>冪等性キー</b>（<code>idempotency_key</code>）により重複排除される:</p>
+      <ul>
+        <li><b>反響メール</b>: Gmail Message-ID をキーとして使用</li>
+        <li><b>LINE</b>: <code>events[].message.id</code> をキーとして使用</li>
+        <li><b>ヒアリング完了</b>: <code>session_id</code> をキーとして使用</li>
+        <li><b>カレンダー</b>: <code>event_id</code> + <code>updated_at</code> をキーとして使用</li>
+      </ul>
+      <p>冪等性キーは<b>Firestore</b>に24時間保持し、同一キーのリクエストには前回のレスポンスを即時返却する。</p>
+
+      <h3 id="retry-policy">リトライポリシー</h3>
+      <p>Webhook送信元からのリトライ、およびCRM側の内部リトライの両方に対応する:</p>
+
+      <p><b>送信元リトライへの対応</b>（受信側として）:</p>
+      <ul>
+        <li>冪等性チェックにより、同一リクエストの再処理を防止</li>
+        <li><code>200 OK</code> を速やかに返却し、送信元のリトライを抑制</li>
+      </ul>
+
+      <p><b>CRM内部リトライ</b>（Firestoreへの書き込み失敗時など）:</p>
+      <table>
+        <thead>
+          <tr><th>項目</th><th>設定値</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>最大リトライ回数</td><td>3回</td></tr>
+          <tr><td>初回待機時間</td><td>1秒</td></tr>
+          <tr><td>バックオフ方式</td><td><b>指数バックオフ + ジッター</b></td></tr>
+          <tr><td>最大待機時間</td><td>30秒</td></tr>
+          <tr><td>リトライ対象</td><td>5xx系エラー、タイムアウト、一時的なDB接続エラー</td></tr>
+          <tr><td>リトライ除外</td><td>4xx系エラー（バリデーション失敗、認証失敗）</td></tr>
+        </tbody>
+      </table>
+
+      <pre><code># 指数バックオフ計算
+import random
+
+def calculate_backoff(attempt: int, base: float = 1.0, max_wait: float = 30.0) -> float:
+    wait = min(base * (2 ** attempt), max_wait)
+    jitter = random.uniform(0, wait * 0.1)
+    return wait + jitter
+
+# attempt 0: 1.0〜1.1秒, attempt 1: 2.0〜2.2秒, attempt 2: 4.0〜4.4秒</code></pre>
+
+      <h3 id="dead-letter-queue">デッドレターキュー（DLQ）</h3>
+      <p>最大リトライ回数を超えて処理に失敗したメッセージは<b>デッドレターキュー</b>に投入される:</p>
+      <ul>
+        <li><b>保存先</b>: Firestoreの <code>crm_webhook_dlq</code> コレクション</li>
+        <li><b>保持期間</b>: 30日間</li>
+        <li><b>保存データ</b>: リクエストボディ全体、エラー情報、リトライ履歴、受信日時</li>
+        <li><b>管理画面</b>: 管理者がDLQメッセージを確認し、手動で再処理 or 破棄を選択</li>
+      </ul>
+
+      <h3 id="monitoring">監視・アラート</h3>
+      <table>
+        <thead>
+          <tr><th>メトリクス</th><th>閾値</th><th>アラート先</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Webhook受信エラー率</td><td>&gt; 5% / 5分間</td><td>Slack #crm-alerts</td></tr>
+          <tr><td>パース失敗率</td><td>&gt; 10% / 1時間</td><td>Slack #crm-alerts</td></tr>
+          <tr><td>DLQ滞留件数</td><td>&gt; 10件</td><td>Slack #crm-alerts + メール</td></tr>
+          <tr><td>認証失敗回数</td><td>&gt; 5回 / 10分間</td><td>Slack #security-alerts</td></tr>
+          <tr><td>レスポンスタイム P95</td><td>&gt; 5秒</td><td>Slack #crm-alerts</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ===== H2: セキュリティ ===== -->
+      <h2 id="security">セキュリティ</h2>
+      <p>Webhookエンドポイントは外部からアクセス可能なため、<b>多層防御</b>のセキュリティ設計を採用する。</p>
+
+      <h3 id="webhook-secret-verification">Webhook Secret検証</h3>
+      <ul>
+        <li>各テナント・各Webhookタイプごとに固有の<b>Webhook Secret</b>を発行</li>
+        <li>Secretは<b>Secret Manager</b>（Google Cloud Secret Manager）で管理</li>
+        <li>定期的なSecret<b>ローテーション</b>（90日ごと推奨）をサポート</li>
+        <li>ローテーション中は<b>新旧2つのSecret</b>を同時に受け付ける移行期間を設ける</li>
+      </ul>
+
+      <h3 id="hmac-signature">HMAC署名</h3>
+      <p>すべてのWebhookは<b>HMAC-SHA256署名</b>で正当性を検証する:</p>
+      <ul>
+        <li><b>反響メール</b>: <code>X-Webhook-Signature: sha256=&lt;hex_digest&gt;</code></li>
+        <li><b>LINE</b>: <code>X-Line-Signature: &lt;base64_digest&gt;</code>（LINE仕様に準拠）</li>
+        <li><b>ヒアリング完了</b>: <code>X-Webhook-Signature: sha256=&lt;hex_digest&gt;</code></li>
+        <li><b>カレンダー</b>: Google Pub/Subのトークンベース検証</li>
+      </ul>
+      <p>署名検証は必ず<b>タイミングセーフ比較</b>（<code>hmac.compare_digest</code>）を使用し、タイミング攻撃を防止する。</p>
+
+      <h3 id="ip-whitelist">IPホワイトリスト</h3>
+      <p>Webhookエンドポイントへのアクセスを<b>送信元IPアドレス</b>で制限する:</p>
+      <table>
+        <thead>
+          <tr><th>Webhook</th><th>ホワイトリスト対象</th><th>管理方式</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>反響メール</td><td>メール転送サービスのIPレンジ</td><td>Cloud Armor ルール</td></tr>
+          <tr><td>LINE</td><td>LINE Platform IPレンジ（<a href="https://developers.line.biz/ja/reference/messaging-api/" target="_blank">公式ドキュメント</a>参照）</td><td>Cloud Armor ルール</td></tr>
+          <tr><td>ヒアリング完了</td><td>内部ネットワーク / VPC</td><td>VPCファイアウォール</td></tr>
+          <tr><td>カレンダー</td><td>Google Pub/Sub IPレンジ</td><td>Cloud Armor ルール</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="rate-limiting">レート制限</h3>
+      <p>不正アクセスやDoS攻撃を防止するため、Webhookエンドポイントにレート制限を適用する:</p>
+      <table>
+        <thead>
+          <tr><th>エンドポイント</th><th>レート制限</th><th>バースト許容</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>/v1/webhook/inquiry-email</code></td><td>100 req/min per tenant</td><td>200 req/min</td></tr>
+          <tr><td><code>/v1/webhook/line-message</code></td><td>500 req/min per tenant</td><td>1000 req/min</td></tr>
+          <tr><td><code>/v1/webhook/hearing-complete</code></td><td>50 req/min per tenant</td><td>100 req/min</td></tr>
+          <tr><td><code>/v1/webhook/calendar-event</code></td><td>100 req/min per tenant</td><td>200 req/min</td></tr>
+        </tbody>
+      </table>
+      <p>レート制限超過時は <code>429 Too Many Requests</code> を返却し、<code>Retry-After</code> ヘッダで再試行可能時刻を通知する。</p>
+
+      <h3 id="additional-security">その他のセキュリティ対策</h3>
+      <ul>
+        <li><b>TLS 1.2以上</b>を必須とし、平文通信は一切許可しない</li>
+        <li>リクエストボディサイズの<b>上限制限</b>（10MB）を設定</li>
+        <li><b>タイムスタンプ検証</b>: リクエストのタイムスタンプが5分以上古い場合は拒否（リプレイ攻撃防止）</li>
+        <li>すべてのWebhookアクセスを<b>Cloud Logging</b>に記録し、<b>監査証跡</b>を維持</li>
+        <li><code>raw_email</code> に含まれるHTMLタグは<b>サニタイズ</b>してからDBに保存</li>
+      </ul>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#webhook-endpoints">Webhookエンドポイント一覧</a></li>
+          <li><a href="#inquiry-email-webhook">反響メール転送Webhook</a></li>
+          <li class="toc-h3"><a href="#inquiry-email-spec">エンドポイント仕様</a></li>
+          <li class="toc-h3"><a href="#inquiry-email-request">リクエスト形式</a></li>
+          <li class="toc-h3"><a href="#inquiry-email-response">レスポンス形式</a></li>
+          <li class="toc-h3"><a href="#inquiry-email-auth">Webhook Secret認証</a></li>
+          <li><a href="#email-parser">メールパーサー仕様</a></li>
+          <li class="toc-h3"><a href="#parser-suumo">SUUMO形式</a></li>
+          <li class="toc-h3"><a href="#parser-homes">HOME'S形式</a></li>
+          <li class="toc-h3"><a href="#parser-flow">パース処理フロー</a></li>
+          <li class="toc-h3"><a href="#parser-fallback">パース失敗時のフォールバック</a></li>
+          <li><a href="#line-webhook">LINE Webhook</a></li>
+          <li class="toc-h3"><a href="#line-spec">エンドポイント仕様</a></li>
+          <li class="toc-h3"><a href="#line-request">リクエスト形式</a></li>
+          <li class="toc-h3"><a href="#line-signature">署名検証（X-Line-Signature）</a></li>
+          <li class="toc-h3"><a href="#line-message-types">メッセージ種別ハンドリング</a></li>
+          <li class="toc-h3"><a href="#line-customer-mapping">顧客マッピング</a></li>
+          <li><a href="#retry-error-handling">リトライ・エラーハンドリング</a></li>
+          <li class="toc-h3"><a href="#idempotency">冪等性保証</a></li>
+          <li class="toc-h3"><a href="#retry-policy">リトライポリシー</a></li>
+          <li class="toc-h3"><a href="#dead-letter-queue">デッドレターキュー（DLQ）</a></li>
+          <li class="toc-h3"><a href="#monitoring">監視・アラート</a></li>
+          <li><a href="#security">セキュリティ</a></li>
+          <li class="toc-h3"><a href="#webhook-secret-verification">Webhook Secret検証</a></li>
+          <li class="toc-h3"><a href="#hmac-signature">HMAC署名</a></li>
+          <li class="toc-h3"><a href="#ip-whitelist">IPホワイトリスト</a></li>
+          <li class="toc-h3"><a href="#rate-limiting">レート制限</a></li>
+          <li class="toc-h3"><a href="#additional-security">その他のセキュリティ対策</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+          <li><a href="crm-gaibu-renkei.html">外部連携設計</a></li>
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        <li><a href="crm-gaibu-renkei.html">外部連携設計</a></li>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

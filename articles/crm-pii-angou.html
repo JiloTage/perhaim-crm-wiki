@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PII暗号化設計 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; <a href="crm-data-model.html">CRMデータモデル設計</a> &gt; PII暗号化設計
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">PII暗号化設計</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2における個人識別情報（PII）の暗号化設計。AES-256-GCMによる暗号化、検索用ハッシュ生成、重複検知メカニズム、ロール別復号権限制御、および宅建業法に基づくデータ保持ポリシーを包括的に定義する。</div>
+
+      <p>本記事では、<a href="crm-data-model.html">CRMデータモデル設計</a>で定義された顧客モデル（Customer）および反響モデル（Inquiry）における<b>PII（Personally Identifiable Information：個人識別情報）</b>の暗号化設計を詳述する。Per Heim CRMは不動産業界特有の法規制（<b>宅建業法</b>）と<b>個人情報保護法</b>に準拠しつつ、高速な検索・重複検知を両立するため、<b>暗号化＋検索用ハッシュの二重構造</b>を採用している。本設計は<a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a>のセキュリティ要件に基づき、<a href="crm-ninshou-kengen.html">CRM認証・権限詳細</a>のロールモデルと連携して運用される。</p>
+
+      <!-- PII暗号化の背景と要件 -->
+      <h2 id="background">PII暗号化の背景と要件</h2>
+
+      <p>不動産CRMは顧客の<b>電話番号</b>、<b>メールアドレス</b>、<b>反響メール原文</b>など機微な個人情報を大量に扱う。宅建業法（宅地建物取引業法）は取引に関わる情報の適切な管理を義務づけており、個人情報保護法は個人データの安全管理措置を求めている。Per Heim CRMでは、これらの法規制に適合するため、PIIを<b>保存時暗号化（encryption at rest）</b>する方針を採る。</p>
+
+      <h3 id="target-fields">暗号化対象フィールド</h3>
+      <p>暗号化の対象となるフィールドは以下の通りである:</p>
+      <table>
+        <thead>
+          <tr><th>モデル</th><th>フィールド</th><th>暗号化列</th><th>検索用ハッシュ列</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Customer</td><td><code>phone</code></td><td><code>phone_encrypted</code></td><td><code>phone_search_hash</code></td><td>電話番号</td></tr>
+          <tr><td>Customer</td><td><code>email</code></td><td><code>email_encrypted</code></td><td><code>email_search_hash</code></td><td>メールアドレス</td></tr>
+          <tr><td>Inquiry</td><td><code>phone</code></td><td><code>phone_encrypted</code></td><td><code>phone_search_hash</code></td><td>反響から抽出した電話番号</td></tr>
+          <tr><td>Inquiry</td><td><code>email</code></td><td><code>email_encrypted</code></td><td><code>email_search_hash</code></td><td>反響から抽出したメール</td></tr>
+          <tr><td>Inquiry</td><td><code>raw_email_body</code></td><td><code>raw_email_body_encrypted</code></td><td>—</td><td>反響メール原文</td></tr>
+        </tbody>
+      </table>
+      <p>API入力では平文の <code>phone</code> / <code>email</code> を受け取ることが許可されるが、<b>Firestoreへの永続化時点で必ず暗号化列と検索用ハッシュへ変換</b>される。平文がデータベースに保存されることはない。</p>
+
+      <!-- 暗号化方式 -->
+      <h2 id="encryption-method">暗号化方式</h2>
+
+      <h3 id="aes-256-gcm">AES-256-GCMの選定理由</h3>
+      <p>Per Heim CRMでは暗号化アルゴリズムとして<b>AES-256-GCM（Galois/Counter Mode）</b>を採用する。選定理由は以下の通りである:</p>
+      <ul>
+        <li><b>認証付き暗号化</b>: GCMモードは暗号化と同時にメッセージ認証コード（MAC）を生成し、データの<b>機密性</b>と<b>完全性</b>を同時に保証する</li>
+        <li><b>業界標準</b>: NIST SP 800-38Dで標準化され、TLS 1.3の必須暗号スイートにも含まれる広く信頼されたアルゴリズム</li>
+        <li><b>高速性</b>: ハードウェアアクセラレーション（AES-NI）に対応し、大量レコードの一括暗号化/復号にも十分な性能を発揮する</li>
+        <li><b>Cloud KMS互換</b>: Google Cloud KMSがネイティブにサポートしており、鍵管理との統合が容易</li>
+      </ul>
+
+      <h3 id="encryption-flow">暗号化/復号フロー</h3>
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TD
+    subgraph 暗号化フロー
+        A[API入力: 平文 phone/email] --> B[バリデーション]
+        B --> C[正規化処理]
+        C --> D[検索用ハッシュ生成<br/>HMAC-SHA256]
+        C --> E[ノンス生成<br/>12バイト乱数]
+        E --> F[AES-256-GCM暗号化]
+        F --> G[暗号文 = nonce + ciphertext + tag]
+        D --> H[Firestoreへ保存]
+        G --> H
+    end
+
+    subgraph 復号フロー
+        I[復号リクエスト] --> J{権限チェック}
+        J -->|権限なし| K[マスキング表示<br/>090-****-1234]
+        J -->|権限あり| L[Cloud KMSから<br/>復号キー取得]
+        L --> M[nonceを分離]
+        M --> N[AES-256-GCM復号]
+        N --> O[認証タグ検証]
+        O -->|OK| P[平文を返却]
+        O -->|NG| Q[改ざん検出エラー]
+    end
+      </pre></div>
+
+      <h3 id="nonce-generation">ノンス（Nonce）生成</h3>
+      <p>AES-GCMの安全性を確保するため、暗号化ごとに<b>12バイト（96ビット）のランダムノンス</b>を生成する。同一鍵でノンスが再利用されると暗号の安全性が破壊されるため、以下の対策を講じる:</p>
+      <ul>
+        <li><code>os.urandom(12)</code> による暗号論的安全な乱数生成を使用</li>
+        <li>ノンスは暗号文の<b>先頭12バイト</b>に連結して保存（別カラム管理は不要）</li>
+        <li>保存形式: <code>base64(nonce[12] + ciphertext + auth_tag[16])</code></li>
+      </ul>
+
+      <h3 id="key-management">鍵管理（Cloud KMS連携）</h3>
+      <p>暗号化鍵はアプリケーションコード内にハードコードせず、<b>Google Cloud KMS</b>で一元管理する:</p>
+      <ul>
+        <li><b>エンベロープ暗号化</b>: Cloud KMSのマスターキー（KEK）でデータ暗号化キー（DEK）をラップし、DEKで実際のPIIを暗号化する</li>
+        <li><b>自動ローテーション</b>: KEKは90日ごとに自動ローテーション。既存データは次回アクセス時に新キーで再暗号化</li>
+        <li><b>アクセス制御</b>: KMSキーへのアクセスはIAMロールで厳格に制限。Cloud Runサービスアカウントのみが復号権限を持つ</li>
+        <li><b>監査ログ</b>: 鍵の使用はCloud Audit Logsに自動記録され、不正アクセスを検知可能</li>
+      </ul>
+
+      <!-- 検索用ハッシュ設計 -->
+      <h2 id="search-hash">検索用ハッシュ設計</h2>
+
+      <p>暗号化されたフィールドは直接検索できないため、<b>検索用ハッシュ</b>を別フィールドに保存する。ハッシュは<b>一方向性</b>であり、ハッシュ値から元の平文を復元することはできない。</p>
+
+      <h3 id="hash-algorithm">ハッシュ生成アルゴリズム</h3>
+      <p>検索用ハッシュには<b>HMAC-SHA256</b>を使用する。単純なSHA-256ではなくHMACを採用する理由は、レインボーテーブル攻撃への耐性を確保するためである。HMACの秘密鍵もCloud KMSで管理する。</p>
+      <pre><code>search_hash = HMAC-SHA256(key=hmac_secret, message=normalized_value)
+# 出力: 64文字のhex文字列</code></pre>
+
+      <h3 id="phone-normalization">電話番号正規化ルール</h3>
+      <p>同一の電話番号が異なる表記で登録された場合でもハッシュが一致するよう、ハッシュ生成前に以下の<b>正規化処理</b>を適用する:</p>
+      <table>
+        <thead>
+          <tr><th>ステップ</th><th>処理</th><th>入力例</th><th>出力例</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>全角→半角変換</td><td><code>０９０−１２３４−５６７８</code></td><td><code>090-1234-5678</code></td></tr>
+          <tr><td>2</td><td>ハイフン・スペース・括弧除去</td><td><code>090-1234-5678</code></td><td><code>09012345678</code></td></tr>
+          <tr><td>3</td><td>国番号統一（+81→0）</td><td><code>+819012345678</code></td><td><code>09012345678</code></td></tr>
+          <tr><td>4</td><td>先頭0の補完</td><td><code>9012345678</code></td><td><code>09012345678</code></td></tr>
+        </tbody>
+      </table>
+      <p>正規化後の電話番号は<b>数字のみ11桁</b>（携帯）または<b>10桁</b>（固定電話）となる。この正規化済み文字列に対してHMAC-SHA256を適用する。</p>
+
+      <h3 id="email-normalization">メール正規化ルール</h3>
+      <p>メールアドレスの正規化は以下の手順で行う:</p>
+      <table>
+        <thead>
+          <tr><th>ステップ</th><th>処理</th><th>入力例</th><th>出力例</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>全体を小文字化</td><td><code>User@Example.COM</code></td><td><code>user@example.com</code></td></tr>
+          <tr><td>2</td><td>前後の空白除去</td><td><code> user@example.com </code></td><td><code>user@example.com</code></td></tr>
+          <tr><td>3</td><td>全角→半角変換</td><td><code>ｕｓｅｒ＠ｅｘａｍｐｌｅ．ｃｏｍ</code></td><td><code>user@example.com</code></td></tr>
+        </tbody>
+      </table>
+      <p>Gmailのドット無視ルール（<code>u.ser@gmail.com</code> = <code>user@gmail.com</code>）やサブアドレス（<code>user+tag@gmail.com</code>）については、<b>Phase 1では正規化対象外</b>とし、Phase 5の重複検知高度化で対応する。</p>
+
+      <!-- 重複検知メカニズム -->
+      <h2 id="duplicate-detection">重複検知メカニズム</h2>
+
+      <p>反響受信時やCSVインポート時、同一顧客の二重登録を防止するために<b>search_hashベースの重複検知</b>を行う。平文での一致検索は一切行わない。</p>
+
+      <h3 id="duplicate-flow">重複候補検出フロー</h3>
+      <ol>
+        <li>新規顧客（または反響）の <code>phone</code> / <code>email</code> を受け取る</li>
+        <li>正規化処理を適用し、<code>phone_search_hash</code> / <code>email_search_hash</code> を生成</li>
+        <li>Firestoreクエリで既存の <code>crm_customers</code> コレクションに対し、同一テナント内でハッシュ一致するドキュメントを検索:
+          <pre><code># 電話番号での重複検索
+db.collection("crm_customers")
+  .where("tenant_id", "==", tenant_id)
+  .where("phone_search_hash", "==", new_phone_hash)
+
+# メールアドレスでの重複検索
+db.collection("crm_customers")
+  .where("tenant_id", "==", tenant_id)
+  .where("email_search_hash", "==", new_email_hash)</code></pre>
+        </li>
+        <li>一致が見つかった場合、<code>duplicate_candidate_ids</code> に候補顧客IDを記録</li>
+        <li>1件のみ一致かつ電話・メール両方が一致する場合は<b>自動紐付け</b>（<code>auto_created</code>）</li>
+        <li>複数候補または片方のみ一致の場合は<b>手動レビュー</b>（<code>manual_review</code> / <code>duplicate</code>）に回す</li>
+      </ol>
+
+      <h3 id="duplicate-api">重複候補検索API</h3>
+      <p>手動での重複確認には専用APIエンドポイントを使用する:</p>
+      <pre><code>GET /v1/tenant/crm/customers/{customer_id}/duplicates
+Response: { candidates: Customer[] }</code></pre>
+      <p>このAPIは対象顧客の <code>phone_search_hash</code> / <code>email_search_hash</code> を用いて同一テナント内の候補を返却する。顧客マージは別エンドポイント（<code>POST /v1/tenant/crm/customers/{customer_id}/merge</code>）で実行する。</p>
+
+      <!-- 復号権限制御 -->
+      <h2 id="decryption-access">復号権限制御</h2>
+
+      <p>PIIの復号は全ユーザーに無条件に許可されるわけではない。<a href="crm-ninshou-kengen.html">CRM認証・権限詳細</a>で定義されたロールモデルに基づき、<b>ロール別の復号可否</b>を制御する。</p>
+
+      <h3 id="role-decryption">ロール別復号権限</h3>
+      <table>
+        <thead>
+          <tr><th>ロール</th><th>復号可否</th><th>対象範囲</th><th>APIレスポンス例（phone）</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>admin</code></td><td>全復号</td><td>テナント内の全顧客</td><td><code>"09012345678"</code></td></tr>
+          <tr><td><code>manager</code></td><td>条件付き復号</td><td>自店舗（<code>store_id</code>一致）の顧客のみ</td><td><code>"09012345678"</code> or <code>"090-****-5678"</code></td></tr>
+          <tr><td><code>sales</code></td><td>条件付き復号</td><td>自身が担当（<code>assigned_employee_id</code>一致）の顧客のみ</td><td><code>"09012345678"</code> or <code>"090-****-5678"</code></td></tr>
+          <tr><td><code>viewer</code></td><td>不可</td><td>—</td><td><code>"090-****-5678"</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="masking-rules">マスキングルール</h3>
+      <p>復号権限がないユーザーへのAPIレスポンスでは、以下のマスキング処理を適用する:</p>
+      <ul>
+        <li><b>電話番号</b>: 先頭3桁と末尾4桁を表示、中間を <code>****</code> に置換（例: <code>090-****-5678</code>）</li>
+        <li><b>メールアドレス</b>: ローカルパートの先頭2文字とドメインを表示（例: <code>us****@example.com</code>）</li>
+        <li><b>反響メール原文</b>: 復号権限がない場合は<code>null</code>を返却</li>
+      </ul>
+      <p>マスキングはAPIレスポンスのシリアライゼーション層で実施され、ビジネスロジック層には平文/暗号文のいずれも渡さない。</p>
+
+      <!-- データ保持と削除 -->
+      <h2 id="data-retention">データ保持と削除</h2>
+
+      <p>不動産取引に関わる個人情報の保持期間は、<b>宅建業法</b>および<b>個人情報保護法</b>の要件に準拠して設定する。</p>
+
+      <h3 id="retention-period">保持期間</h3>
+      <table>
+        <thead>
+          <tr><th>データ区分</th><th>保持期間</th><th>根拠</th><th>削除方式</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>顧客データ（成約: <code>contracted</code>）</td><td><b>10年</b></td><td>宅建業法（帳簿保存義務）</td><td>保持期間満了後に物理削除</td></tr>
+          <tr><td>顧客データ（失注: <code>lost</code>）</td><td><b>3年</b></td><td>CRM v3.2 仕様</td><td>保持期間満了後に物理削除</td></tr>
+          <tr><td>コミュニケーション記録</td><td><b>5年</b></td><td>宅建業法</td><td>顧客削除に連動</td></tr>
+          <tr><td>監査ログ</td><td><b>5年</b></td><td>CRM v3.2 仕様</td><td>自動物理削除</td></tr>
+          <tr><td>反響メール原文</td><td><b>1年</b></td><td>データ最小化原則</td><td>パース済みデータは保持、原文のみ削除</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="deletion-strategy">論理削除と物理削除の使い分け</h3>
+      <ul>
+        <li><b>論理削除</b>（<code>DELETE /v1/tenant/crm/customers/{customer_id}</code>）: <code>deleted_at</code> タイムスタンプを設定。UIからは非表示となるが、データは保持期間満了まで残存する。管理者による復元が可能。</li>
+        <li><b>物理削除</b>: 保持期間満了後にバッチジョブで実行。暗号化列・検索用ハッシュ・関連するタイムラインイベント・コミュニケーション記録を含む全関連データを完全消去する。</li>
+        <li><b>暗号化シュレッディング</b>: 緊急時には暗号化キー（DEK）を破棄することで、暗号文を復号不能にする。データを個別に削除するより高速かつ確実。</li>
+      </ul>
+
+      <h3 id="gdpr">GDPR対応</h3>
+      <p>現時点でPer Heim CRMの主要市場は国内であるが、将来的なGDPR対応に向けて以下の設計方針を採用している:</p>
+      <ul>
+        <li><b>データポータビリティ</b>: 顧客データの復号・エクスポート機能を管理者向けに提供可能な構造</li>
+        <li><b>忘れられる権利</b>: 暗号化シュレッディングにより、削除要求への即座対応が可能</li>
+        <li><b>同意管理</b>: 将来のPhaseで同意取得・撤回フローを追加する拡張ポイントを確保</li>
+      </ul>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#background">PII暗号化の背景と要件</a></li>
+          <li class="toc-h3"><a href="#target-fields">暗号化対象フィールド</a></li>
+          <li><a href="#encryption-method">暗号化方式</a></li>
+          <li class="toc-h3"><a href="#aes-256-gcm">AES-256-GCMの選定理由</a></li>
+          <li class="toc-h3"><a href="#encryption-flow">暗号化/復号フロー</a></li>
+          <li class="toc-h3"><a href="#nonce-generation">ノンス（Nonce）生成</a></li>
+          <li class="toc-h3"><a href="#key-management">鍵管理（Cloud KMS連携）</a></li>
+          <li><a href="#search-hash">検索用ハッシュ設計</a></li>
+          <li class="toc-h3"><a href="#hash-algorithm">ハッシュ生成アルゴリズム</a></li>
+          <li class="toc-h3"><a href="#phone-normalization">電話番号正規化ルール</a></li>
+          <li class="toc-h3"><a href="#email-normalization">メール正規化ルール</a></li>
+          <li><a href="#duplicate-detection">重複検知メカニズム</a></li>
+          <li class="toc-h3"><a href="#duplicate-flow">重複候補検出フロー</a></li>
+          <li class="toc-h3"><a href="#duplicate-api">重複候補検索API</a></li>
+          <li><a href="#decryption-access">復号権限制御</a></li>
+          <li class="toc-h3"><a href="#role-decryption">ロール別復号権限</a></li>
+          <li class="toc-h3"><a href="#masking-rules">マスキングルール</a></li>
+          <li><a href="#data-retention">データ保持と削除</a></li>
+          <li class="toc-h3"><a href="#retention-period">保持期間</a></li>
+          <li class="toc-h3"><a href="#deletion-strategy">論理削除と物理削除の使い分け</a></li>
+          <li class="toc-h3"><a href="#gdpr">GDPR対応</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+          <li><a href="crm-ninshou-kengen.html">CRM認証・権限詳細</a></li>
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+        <li><a href="crm-ninshou-kengen.html">CRM認証・権限詳細</a></li>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

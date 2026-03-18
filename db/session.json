@@ -1,6 +1,6 @@
 {
-  "last_phase": "phase2",
-  "expansion_frontier": ["hybrid-kakuchou-architecture", "crm-data-model", "crm-api-sekkei", "crm-frontend-sekkei", "crm-jissou-phase"],
+  "last_phase": "phase2_complete",
+  "expansion_frontier": [],
   "settings": {
     "max_agents": 3,
     "max_depth": 2,
