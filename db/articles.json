@@ -10,7 +10,7 @@
       "depth": 0,
       "links_to": ["hybrid-kakuchou-architecture", "crm-data-model", "crm-api-sekkei", "crm-frontend-sekkei", "crm-jissou-phase"],
       "linked_from": ["hybrid-kakuchou-architecture", "crm-api-sekkei", "crm-data-model", "crm-frontend-sekkei", "crm-jissou-phase", "crm-ninshou-kengen", "crm-gaibu-renkei", "crm-phase-kanri", "crm-webhook-sekkei", "crm-tsuchi-sekkei", "crm-pii-angou", "crm-bunseki-report"],
-      "summary": "Per HeimにCRM v3.2機能を統合するための包括的設計書。ハイブリッド拡張アーキテクチャにより既存AIヒアリング機能を維持しつつ、反響取込・顧客管理・追客・分析を実現する。",
+      "summary": "Per HeimにCRM v3.2機能を統合するための包括的設計書。",
       "expansion_status": "expanded",
       "interestingness_score": 1.0
     },
@@ -24,7 +24,7 @@
       "depth": 1,
       "links_to": ["perheim-crm-tougou-sekkei", "crm-ninshou-kengen", "crm-gaibu-renkei", "crm-data-model"],
       "linked_from": ["perheim-crm-tougou-sekkei", "crm-jissou-phase", "crm-ninshou-kengen", "crm-gaibu-renkei"],
-      "summary": "既存AIヒアリング機能を一切変更せず、CRM機能を独立モジュールとして追加するハイブリッド拡張アーキテクチャ設計。",
+      "summary": "既存AIヒアリング機能を一切変更せず、CRM機能を独立モジュールとして追加する設計。",
       "expansion_status": "expanded",
       "interestingness_score": 0.95
     },
@@ -37,8 +37,8 @@
       "parent_id": "perheim-crm-tougou-sekkei",
       "depth": 1,
       "links_to": ["perheim-crm-tougou-sekkei", "crm-phase-kanri", "crm-pii-angou"],
-      "linked_from": ["perheim-crm-tougou-sekkei", "hybrid-kakuchou-architecture", "crm-api-sekkei", "crm-frontend-sekkei", "crm-jissou-phase", "crm-phase-kanri", "crm-pii-angou"],
-      "summary": "Firestoreコレクション設計と各データモデル（顧客・タスク・タイムライン・コミュニケーション・反響）の詳細仕様。",
+      "linked_from": ["perheim-crm-tougou-sekkei", "hybrid-kakuchou-architecture", "crm-api-sekkei", "crm-frontend-sekkei", "crm-jissou-phase", "crm-phase-kanri", "crm-pii-angou", "gamen-customer-card"],
+      "summary": "Firestoreコレクション設計と各データモデルの詳細仕様。",
       "expansion_status": "expanded",
       "interestingness_score": 0.95
     },
@@ -51,7 +51,7 @@
       "parent_id": "perheim-crm-tougou-sekkei",
       "depth": 1,
       "links_to": ["perheim-crm-tougou-sekkei", "crm-data-model", "crm-webhook-sekkei"],
-      "linked_from": ["perheim-crm-tougou-sekkei", "crm-frontend-sekkei", "crm-gaibu-renkei", "crm-webhook-sekkei", "crm-tsuchi-sekkei", "crm-kanban-jissou", "crm-bunseki-report"],
+      "linked_from": ["perheim-crm-tougou-sekkei", "crm-frontend-sekkei", "crm-gaibu-renkei", "crm-webhook-sekkei", "crm-tsuchi-sekkei", "crm-kanban-jissou", "crm-bunseki-report", "gamen-dashboard", "gamen-kanban", "gamen-customer-card"],
       "summary": "顧客管理・タスク管理・追客・反響管理・分析・カンバンの全APIエンドポイント設計。",
       "expansion_status": "expanded",
       "interestingness_score": 0.9
@@ -65,8 +65,8 @@
       "parent_id": "perheim-crm-tougou-sekkei",
       "depth": 1,
       "links_to": ["perheim-crm-tougou-sekkei", "crm-api-sekkei", "crm-data-model", "crm-kanban-jissou"],
-      "linked_from": ["perheim-crm-tougou-sekkei", "crm-phase-kanri", "crm-kanban-jissou"],
-      "summary": "ダッシュボード・カンバン・顧客カードの主要3画面のUI設計、ルーティング、CSS方針。",
+      "linked_from": ["perheim-crm-tougou-sekkei", "crm-phase-kanri", "crm-kanban-jissou", "gamen-dashboard", "gamen-kanban", "gamen-customer-card"],
+      "summary": "ダッシュボード・カンバン・顧客カードの主要3画面のUI設計。",
       "expansion_status": "expanded",
       "interestingness_score": 0.9
     },
@@ -80,7 +80,7 @@
       "depth": 1,
       "links_to": ["perheim-crm-tougou-sekkei", "hybrid-kakuchou-architecture", "crm-data-model", "crm-tsuchi-sekkei", "crm-bunseki-report"],
       "linked_from": ["perheim-crm-tougou-sekkei", "crm-tsuchi-sekkei", "crm-bunseki-report"],
-      "summary": "Phase 0〜7の段階的実装計画、通知設計、分析・レポート設計、非機能要件、リスクと対策。",
+      "summary": "Phase 0〜7の段階的実装計画、通知設計、非機能要件、リスクと対策。",
       "expansion_status": "expanded",
       "interestingness_score": 0.9
     },
@@ -94,7 +94,7 @@
       "depth": 2,
       "links_to": ["hybrid-kakuchou-architecture", "perheim-crm-tougou-sekkei"],
       "linked_from": ["hybrid-kakuchou-architecture", "crm-pii-angou"],
-      "summary": "3ロール（admin/manager/sales）の権限マトリクス、CrmActor解決フロー、データスコープ制御。",
+      "summary": "3ロール権限マトリクス、CrmActor解決フロー、データスコープ制御。",
       "expansion_status": "complete",
       "interestingness_score": 0.72
     },
@@ -108,7 +108,7 @@
       "depth": 2,
       "links_to": ["hybrid-kakuchou-architecture", "crm-api-sekkei", "perheim-crm-tougou-sekkei"],
       "linked_from": ["hybrid-kakuchou-architecture", "crm-webhook-sekkei"],
-      "summary": "LINE/Gmail/Google Calendar/CSVの4つの外部連携チャネルの詳細設計。",
+      "summary": "LINE/Gmail/Google Calendar/CSVの4連携チャネル詳細設計。",
       "expansion_status": "complete",
       "interestingness_score": 0.68
     },
@@ -121,8 +121,8 @@
       "parent_id": "crm-data-model",
       "depth": 2,
       "links_to": ["crm-data-model", "crm-frontend-sekkei", "perheim-crm-tougou-sekkei"],
-      "linked_from": ["crm-data-model", "crm-kanban-jissou", "crm-bunseki-report"],
-      "summary": "10段階CustomerPhaseの遷移ルール、自動アクション、カンバン対応、KPI設計。",
+      "linked_from": ["crm-data-model", "crm-kanban-jissou", "crm-bunseki-report", "gamen-kanban", "gamen-customer-card"],
+      "summary": "10段階CustomerPhaseの遷移ルール・自動アクション・KPI設計。",
       "expansion_status": "complete",
       "interestingness_score": 0.68
     },
@@ -136,7 +136,7 @@
       "depth": 2,
       "links_to": ["crm-api-sekkei", "crm-gaibu-renkei", "perheim-crm-tougou-sekkei"],
       "linked_from": ["crm-api-sekkei"],
-      "summary": "反響メール/LINE/ヒアリング完了/カレンダーの4種Webhookの詳細仕様。署名検証・リトライ・パーサー設計。",
+      "summary": "反響メール/LINE/ヒアリング完了/カレンダーの4種Webhook仕様。",
       "expansion_status": "complete",
       "interestingness_score": 0.68
     },
@@ -150,7 +150,7 @@
       "depth": 2,
       "links_to": ["crm-jissou-phase", "crm-api-sekkei", "perheim-crm-tougou-sekkei"],
       "linked_from": ["crm-jissou-phase"],
-      "summary": "3段階通知チャネル、7通知イベント、NotificationService、Web Push、Cloud Tasks/Schedulerの詳細設計。",
+      "summary": "3段階通知チャネル、7通知イベント、NotificationService設計。",
       "expansion_status": "complete",
       "interestingness_score": 0.64
     },
@@ -163,8 +163,8 @@
       "parent_id": "crm-frontend-sekkei",
       "depth": 2,
       "links_to": ["crm-frontend-sekkei", "crm-phase-kanri", "crm-api-sekkei"],
-      "linked_from": ["crm-frontend-sekkei"],
-      "summary": "カンバンビューの@dnd-kitドラッグ&ドロップ、楽観的UI更新、8カラム構成、パフォーマンス最適化の実装設計。",
+      "linked_from": ["crm-frontend-sekkei", "gamen-kanban"],
+      "summary": "カンバンビューの@dnd-kitドラッグ&ドロップ、楽観的UI更新、パフォーマンス最適化。",
       "expansion_status": "complete",
       "interestingness_score": 0.64
     },
@@ -178,7 +178,7 @@
       "depth": 2,
       "links_to": ["crm-data-model", "crm-ninshou-kengen", "perheim-crm-tougou-sekkei"],
       "linked_from": ["crm-data-model"],
-      "summary": "AES-256-GCM暗号化、検索用ハッシュ、重複検知、復号権限制御、宅建業法に基づくデータ保持ポリシー。",
+      "summary": "AES-256-GCM暗号化、検索用ハッシュ、復号権限制御。",
       "expansion_status": "complete",
       "interestingness_score": 0.64
     },
@@ -191,12 +191,54 @@
       "parent_id": "crm-jissou-phase",
       "depth": 2,
       "links_to": ["crm-jissou-phase", "crm-api-sekkei", "crm-phase-kanri", "perheim-crm-tougou-sekkei"],
-      "linked_from": ["crm-jissou-phase"],
-      "summary": "デュアルファネル、ROI訴求指標、ダッシュボードKPI、リードタイム分析、月次レポート、集計アーキテクチャ移行計画。",
+      "linked_from": ["crm-jissou-phase", "gamen-dashboard"],
+      "summary": "デュアルファネル、ROI訴求指標、集計アーキテクチャ移行計画。",
       "expansion_status": "complete",
       "interestingness_score": 0.64
+    },
+    "gamen-dashboard": {
+      "id": "gamen-dashboard",
+      "title": "ダッシュボード画面仕様",
+      "filename": "articles/gamen-dashboard.html",
+      "created_at": "2026-03-19T00:00:00+09:00",
+      "updated_at": "2026-03-19T00:00:00+09:00",
+      "parent_id": "crm-frontend-sekkei",
+      "depth": 2,
+      "links_to": ["crm-frontend-sekkei", "crm-api-sekkei", "crm-bunseki-report"],
+      "linked_from": [],
+      "summary": "ダッシュボード画面のワイヤーフレーム図解。KPIカード、デュアルファネル、タスクリスト、反響リストの4セクション構成を視覚的に定義。",
+      "expansion_status": "complete",
+      "interestingness_score": 0.72
+    },
+    "gamen-kanban": {
+      "id": "gamen-kanban",
+      "title": "カンバン画面仕様",
+      "filename": "articles/gamen-kanban.html",
+      "created_at": "2026-03-19T00:00:00+09:00",
+      "updated_at": "2026-03-19T00:00:00+09:00",
+      "parent_id": "crm-frontend-sekkei",
+      "depth": 2,
+      "links_to": ["crm-frontend-sekkei", "crm-kanban-jissou", "crm-phase-kanri", "crm-api-sekkei"],
+      "linked_from": [],
+      "summary": "カンバンボード画面のワイヤーフレーム図解。8カラム構成、顧客カード、D&D操作フロー、フィルタ仕様。",
+      "expansion_status": "complete",
+      "interestingness_score": 0.72
+    },
+    "gamen-customer-card": {
+      "id": "gamen-customer-card",
+      "title": "顧客カード画面仕様",
+      "filename": "articles/gamen-customer-card.html",
+      "created_at": "2026-03-19T00:00:00+09:00",
+      "updated_at": "2026-03-19T00:00:00+09:00",
+      "parent_id": "crm-frontend-sekkei",
+      "depth": 2,
+      "links_to": ["crm-frontend-sekkei", "crm-data-model", "crm-phase-kanri", "crm-api-sekkei"],
+      "linked_from": [],
+      "summary": "顧客カード画面の2ペインレイアウト、AIプロファイル（NeedsTags）、タイムライン、アクションモーダルのワイヤーフレーム図解。",
+      "expansion_status": "complete",
+      "interestingness_score": 0.72
     }
   },
   "root_id": "perheim-crm-tougou-sekkei",
-  "total_count": 14
+  "total_count": 17
 }

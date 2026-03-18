@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>顧客カード画面仕様 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a> &gt; 顧客カード画面仕様
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">顧客カード画面仕様</h1>
+      <div class="article-meta">最終更新: 2026-03-19</div>
+      <div class="article-summary">顧客カード画面（CustomerCardView）の詳細UI仕様。2ペインレイアウト、ヘッダー、基本情報パネル、AIプロファイル（NeedsTags）、タイムライン、アクションモーダル群の画面構成をワイヤーフレームで図解する。</div>
+
+      <!-- ============================================ -->
+      <!-- H2: 画面全体レイアウト                        -->
+      <!-- ============================================ -->
+      <h2 id="gamen-zentai-layout">画面全体レイアウト</h2>
+
+      <p>顧客カード画面は<strong>ヘッダー＋2ペイン構成</strong>を採用する。左ペイン（280px固定）に基本情報・タスク・アクションボタンを集約し、右ペイン（残り幅）にタブ切替でコンテンツを表示する。ルーティングは <code>/crm/customers/:id</code> に対応（<a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a>参照）。</p>
+
+      <!-- ワイヤーフレーム: 画面全体 -->
+      <div style="border: 2px solid #333; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', sans-serif; font-size: 13px; background: #fafafa; max-width: 900px; margin: 20px auto;">
+
+        <!-- ヘッダー -->
+        <div style="background: #f0f0f0; border-bottom: 2px solid #333; padding: 10px 16px; display: flex; align-items: center; gap: 12px;">
+          <span style="color: #555; cursor: pointer;">&larr; 戻る</span>
+          <span style="border-left: 1px solid #999; height: 20px;"></span>
+          <span style="font-size: 18px; font-weight: bold;">田中 太郎</span>
+          <span style="background: #e8f5e9; color: #2e7d32; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: bold;">ヒアリング済</span>
+          <span style="color: #888; font-size: 12px; margin-left: 8px;">SUUMO反響</span>
+          <span style="margin-left: auto; color: #666; font-size: 12px;">担当: 営業A</span>
+        </div>
+
+        <!-- 2ペイン -->
+        <div style="display: flex; min-height: 420px;">
+
+          <!-- 左ペイン -->
+          <div style="width: 280px; min-width: 280px; border-right: 2px solid #333; background: #f8f8f8; padding: 12px;">
+
+            <!-- 基本情報 -->
+            <div style="background: #fff; border: 1px solid #ccc; border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+              <div style="font-weight: bold; font-size: 12px; color: #555; border-bottom: 1px solid #eee; padding-bottom: 4px; margin-bottom: 8px;">基本情報</div>
+              <div style="font-size: 12px; line-height: 2;">
+                &#x1F4DE; 090-****-1234<br>
+                &#x2709; tanaka@example.com<br>
+                &#x1F3E0; 東京都渋谷区xx-xx<br>
+                &#x1F4AC; 連絡希望: LINE
+              </div>
+            </div>
+
+            <!-- タスク -->
+            <div style="background: #fff; border: 1px solid #ccc; border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+              <div style="font-weight: bold; font-size: 12px; color: #555; border-bottom: 1px solid #eee; padding-bottom: 4px; margin-bottom: 8px;">タスク</div>
+              <div style="font-size: 12px; line-height: 2;">
+                &#x2610; 電話フォロー <span style="color: #e53935; font-size: 11px;">期限: 今日</span><br>
+                &#x2610; 物件提案メール送付 <span style="color: #888; font-size: 11px;">期限: 3/20</span><br>
+                &#x2611; ヒアリングURL送付 <span style="color: #aaa; font-size: 11px; text-decoration: line-through;">完了</span>
+              </div>
+              <div style="margin-top: 6px; text-align: center;">
+                <span style="color: #1976d2; font-size: 12px; cursor: pointer;">+ タスク追加</span>
+              </div>
+            </div>
+
+            <!-- アクションボタン群 -->
+            <div style="background: #fff; border: 1px solid #ccc; border-radius: 6px; padding: 10px;">
+              <div style="font-weight: bold; font-size: 12px; color: #555; border-bottom: 1px solid #eee; padding-bottom: 4px; margin-bottom: 8px;">アクション</div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                <div style="background: #e3f2fd; border: 1px solid #90caf9; border-radius: 4px; text-align: center; padding: 8px 0; font-size: 12px; cursor: pointer;">&#x1F4DE; 電話</div>
+                <div style="background: #fce4ec; border: 1px solid #ef9a9a; border-radius: 4px; text-align: center; padding: 8px 0; font-size: 12px; cursor: pointer;">&#x2709; メール</div>
+                <div style="background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 4px; text-align: center; padding: 8px 0; font-size: 12px; cursor: pointer;">&#x1F4AC; LINE</div>
+                <div style="background: #f3e5f5; border: 1px solid #ce93d8; border-radius: 4px; text-align: center; padding: 8px 0; font-size: 12px; cursor: pointer;">&#x1F4CE; URL発行</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右ペイン -->
+          <div style="flex: 1; padding: 0;">
+
+            <!-- タブバー -->
+            <div style="display: flex; border-bottom: 2px solid #333; background: #f5f5f5;">
+              <div style="padding: 10px 20px; font-size: 13px; font-weight: bold; border-bottom: 3px solid #1976d2; color: #1976d2; background: #fff;">概要</div>
+              <div style="padding: 10px 20px; font-size: 13px; color: #666;">AIプロファイル</div>
+              <div style="padding: 10px 20px; font-size: 13px; color: #666;">通話</div>
+              <div style="padding: 10px 20px; font-size: 13px; color: #666;">メモ</div>
+            </div>
+
+            <!-- タブコンテンツ: 概要（タイムライン） -->
+            <div style="padding: 16px;">
+              <div style="font-weight: bold; font-size: 13px; margin-bottom: 12px;">タイムライン</div>
+
+              <!-- タイムラインアイテム群 -->
+              <div style="position: relative; padding-left: 24px;">
+                <!-- 縦線 -->
+                <div style="position: absolute; left: 8px; top: 4px; bottom: 4px; width: 2px; background: #ddd;"></div>
+
+                <div style="position: relative; margin-bottom: 14px;">
+                  <div style="position: absolute; left: -20px; top: 3px; width: 12px; height: 12px; background: #4caf50; border-radius: 50%;"></div>
+                  <div style="font-size: 11px; color: #888;">3/18 14:30</div>
+                  <div style="font-size: 13px;">ヒアリング完了 <span style="color: #4caf50; font-size: 11px;">(完了率100%)</span></div>
+                </div>
+
+                <div style="position: relative; margin-bottom: 14px;">
+                  <div style="position: absolute; left: -20px; top: 3px; width: 12px; height: 12px; background: #2196f3; border-radius: 50%;"></div>
+                  <div style="font-size: 11px; color: #888;">3/17 10:15</div>
+                  <div style="font-size: 13px;">ヒアリングURL送付</div>
+                </div>
+
+                <div style="position: relative; margin-bottom: 14px;">
+                  <div style="position: absolute; left: -20px; top: 3px; width: 12px; height: 12px; background: #ff9800; border-radius: 50%;"></div>
+                  <div style="font-size: 11px; color: #888;">3/17 10:10</div>
+                  <div style="font-size: 13px;">サンクスメール送信</div>
+                </div>
+
+                <div style="position: relative; margin-bottom: 14px;">
+                  <div style="position: absolute; left: -20px; top: 3px; width: 12px; height: 12px; background: #9c27b0; border-radius: 50%;"></div>
+                  <div style="font-size: 11px; color: #888;">3/17 09:45</div>
+                  <div style="font-size: 13px;">反響受信 <span style="color: #666; font-size: 11px;">(SUUMO)</span></div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p style="text-align: center; font-size: 12px; color: #888;">図1: 顧客カード画面 全体ワイヤーフレーム（概要タブ表示時）</p>
+
+      <p>コンポーネント構成は <code>CustomerCardView &gt; CustomerHeader + LeftPane(BasicInfo, TaskList, ActionButtons) + RightPane(TabBar + TabContent)</code> となる。データモデルは <a href="crm-data-model.html">CRMデータモデル設計</a> の <code>customers</code> コレクションを参照する。</p>
+
+
+      <!-- ============================================ -->
+      <!-- H2: ヘッダーセクション詳細                     -->
+      <!-- ============================================ -->
+      <h2 id="header-section">ヘッダーセクション詳細</h2>
+
+      <p>顧客ヘッダーは画面上部に固定表示され、「戻る」ナビゲーション・顧客名・フェーズバッジ・メタ情報を一行に集約する。<a href="crm-phase-kanri.html">フェーズ管理詳細</a>で定義された10段階のPhaseTagコンポーネントがバッジとして表示される。</p>
+
+      <!-- ワイヤーフレーム: ヘッダー詳細 -->
+      <div style="border: 2px solid #333; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', sans-serif; font-size: 13px; background: #fafafa; max-width: 900px; margin: 20px auto;">
+
+        <!-- メインヘッダー行 -->
+        <div style="background: #f0f0f0; padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #ddd;">
+          <div style="background: #fff; border: 1px solid #999; border-radius: 4px; padding: 4px 12px; font-size: 12px; color: #555; cursor: pointer;">&larr; 戻る</div>
+          <div style="font-size: 20px; font-weight: bold; color: #222;">田中 太郎</div>
+          <div style="background: #e8f5e9; color: #2e7d32; padding: 3px 12px; border-radius: 14px; font-size: 11px; font-weight: bold; border: 1px solid #a5d6a7;">ヒアリング済</div>
+          <div style="margin-left: auto; display: flex; gap: 16px; font-size: 12px; color: #777;">
+            <span>&#x1F4E5; SUUMO反響</span>
+            <span>&#x1F464; 担当: 営業A</span>
+            <span>&#x1F4C5; 登録: 2026/03/17</span>
+          </div>
+        </div>
+
+        <!-- ヘッダー構成ラベル -->
+        <div style="padding: 8px 16px; background: #fff; display: flex; gap: 4px; font-size: 10px; color: #999;">
+          <span style="background: #e3f2fd; padding: 2px 8px; border-radius: 3px;">&larr; BackButton</span>
+          <span style="background: #e8eaf6; padding: 2px 8px; border-radius: 3px;">CustomerName</span>
+          <span style="background: #f3e5f5; padding: 2px 8px; border-radius: 3px;">PhaseTag</span>
+          <span style="background: #fff3e0; padding: 2px 8px; border-radius: 3px;">SourceBadge</span>
+          <span style="background: #fce4ec; padding: 2px 8px; border-radius: 3px;">AssigneeLabel</span>
+          <span style="background: #e0f2f1; padding: 2px 8px; border-radius: 3px;">CreatedDate</span>
+        </div>
+      </div>
+
+      <p style="text-align: center; font-size: 12px; color: #888;">図2: ヘッダーセクション詳細 &mdash; コンポーネント分解</p>
+
+      <h3>PhaseTag カラーマッピング</h3>
+      <div style="max-width: 700px; margin: 10px auto; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px;">
+        <span style="background: #e3f2fd; color: #1565c0; padding: 3px 10px; border-radius: 12px; border: 1px solid #90caf9;">新規反響</span>
+        <span style="background: #fff3e0; color: #e65100; padding: 3px 10px; border-radius: 12px; border: 1px solid #ffcc80;">対応中</span>
+        <span style="background: #fce4ec; color: #c62828; padding: 3px 10px; border-radius: 12px; border: 1px solid #ef9a9a;">ヒアリング中</span>
+        <span style="background: #e8f5e9; color: #2e7d32; padding: 3px 10px; border-radius: 12px; border: 1px solid #a5d6a7;">ヒアリング済</span>
+        <span style="background: #ede7f6; color: #4527a0; padding: 3px 10px; border-radius: 12px; border: 1px solid #b39ddb;">提案中</span>
+        <span style="background: #e0f7fa; color: #00695c; padding: 3px 10px; border-radius: 12px; border: 1px solid #80deea;">来店予定</span>
+        <span style="background: #f1f8e9; color: #33691e; padding: 3px 10px; border-radius: 12px; border: 1px solid #aed581;">来店済</span>
+        <span style="background: #fff9c4; color: #f57f17; padding: 3px 10px; border-radius: 12px; border: 1px solid #fff176;">申込</span>
+        <span style="background: #c8e6c9; color: #1b5e20; padding: 3px 10px; border-radius: 12px; border: 1px solid #66bb6a; font-weight: bold;">成約</span>
+        <span style="background: #f5f5f5; color: #616161; padding: 3px 10px; border-radius: 12px; border: 1px solid #bdbdbd;">失注</span>
+      </div>
+
+
+      <!-- ============================================ -->
+      <!-- H2: 左ペイン — 基本情報パネル                  -->
+      <!-- ============================================ -->
+      <h2 id="left-pane-basic-info">左ペイン &mdash; 基本情報パネル</h2>
+
+      <p>左ペインは280px固定幅で、<strong>基本情報カード</strong>、<strong>タスクカード</strong>、<strong>アクションカード</strong>の3つのカードを縦に配置する。PII情報のマスク表示は <a href="crm-data-model.html">CRMデータモデル設計</a> の暗号化仕様に準拠する。</p>
+
+      <!-- ワイヤーフレーム: 左ペイン詳細 -->
+      <div style="border: 2px solid #333; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', sans-serif; font-size: 13px; background: #f8f8f8; width: 300px; margin: 20px auto; padding: 12px;">
+
+        <!-- 基本情報カード -->
+        <div style="background: #fff; border: 1px solid #ccc; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-weight: bold; font-size: 13px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 6px; margin-bottom: 10px;">&#x1F4CB; 基本情報</div>
+
+          <div style="margin-bottom: 8px;">
+            <div style="font-size: 11px; color: #999;">電話番号</div>
+            <div style="font-size: 13px; display: flex; align-items: center; gap: 6px;">
+              &#x1F4DE; <span style="letter-spacing: 1px;">090-****-1234</span>
+              <span style="font-size: 10px; color: #1976d2; cursor: pointer; border: 1px solid #90caf9; padding: 1px 6px; border-radius: 3px;">表示</span>
+              <span style="font-size: 10px; color: #666; cursor: pointer; border: 1px solid #ccc; padding: 1px 6px; border-radius: 3px;">&#x1F4CB; コピー</span>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 8px;">
+            <div style="font-size: 11px; color: #999;">メール</div>
+            <div style="font-size: 13px;">&#x2709; tanaka@example.com</div>
+          </div>
+
+          <div style="margin-bottom: 8px;">
+            <div style="font-size: 11px; color: #999;">住所</div>
+            <div style="font-size: 13px;">&#x1F3E0; 東京都渋谷区神南1-xx-xx</div>
+          </div>
+
+          <div style="margin-bottom: 4px;">
+            <div style="font-size: 11px; color: #999;">連絡希望</div>
+            <div style="font-size: 13px; display: flex; gap: 4px;">
+              <span style="background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; border: 1px solid #a5d6a7;">LINE</span>
+              <span style="background: #f5f5f5; color: #999; padding: 2px 8px; border-radius: 10px; font-size: 11px;">電話</span>
+              <span style="background: #f5f5f5; color: #999; padding: 2px 8px; border-radius: 10px; font-size: 11px;">any</span>
+            </div>
+          </div>
+
+          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee;">
+            <div style="font-size: 11px; color: #999;">メモ</div>
+            <div style="font-size: 12px; color: #555; background: #fafafa; padding: 4px 6px; border-radius: 3px; min-height: 24px;">夕方以降の連絡希望。犬可の物件。</div>
+          </div>
+        </div>
+
+        <!-- タスクカード -->
+        <div style="background: #fff; border: 1px solid #ccc; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-weight: bold; font-size: 13px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 6px; margin-bottom: 10px; display: flex; justify-content: space-between;">
+            <span>&#x2705; タスク</span>
+            <span style="font-size: 11px; color: #999; font-weight: normal;">1/3 完了</span>
+          </div>
+
+          <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 6px; font-size: 12px;">
+            <span style="width: 16px; height: 16px; border: 2px solid #e53935; border-radius: 3px; display: inline-block;"></span>
+            <span>電話フォロー</span>
+            <span style="margin-left: auto; background: #ffebee; color: #e53935; font-size: 10px; padding: 1px 6px; border-radius: 3px;">今日</span>
+          </div>
+
+          <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 6px; font-size: 12px;">
+            <span style="width: 16px; height: 16px; border: 2px solid #ccc; border-radius: 3px; display: inline-block;"></span>
+            <span>物件提案メール送付</span>
+            <span style="margin-left: auto; color: #999; font-size: 10px;">3/20</span>
+          </div>
+
+          <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #aaa; text-decoration: line-through;">
+            <span style="width: 16px; height: 16px; border: 2px solid #a5d6a7; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; background: #e8f5e9; font-size: 10px; color: #4caf50;">&#x2713;</span>
+            <span>ヒアリングURL送付</span>
+          </div>
+
+          <div style="margin-top: 8px; text-align: center;">
+            <span style="color: #1976d2; font-size: 12px; cursor: pointer; border: 1px dashed #90caf9; padding: 4px 16px; border-radius: 4px;">+ タスク追加</span>
+          </div>
+        </div>
+
+        <!-- アクションカード -->
+        <div style="background: #fff; border: 1px solid #ccc; border-radius: 6px; padding: 12px;">
+          <div style="font-weight: bold; font-size: 13px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 6px; margin-bottom: 10px;">&#x26A1; アクション</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div style="background: #e3f2fd; border: 1px solid #90caf9; border-radius: 6px; text-align: center; padding: 12px 0; font-size: 12px; cursor: pointer;">
+              <div style="font-size: 20px;">&#x1F4DE;</div>
+              <div style="margin-top: 2px;">電話</div>
+              <div style="font-size: 9px; color: #999;">通話記録モーダル</div>
+            </div>
+            <div style="background: #fce4ec; border: 1px solid #ef9a9a; border-radius: 6px; text-align: center; padding: 12px 0; font-size: 12px; cursor: pointer;">
+              <div style="font-size: 20px;">&#x2709;</div>
+              <div style="margin-top: 2px;">メール</div>
+              <div style="font-size: 9px; color: #999;">メール作成モーダル</div>
+            </div>
+            <div style="background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 6px; text-align: center; padding: 12px 0; font-size: 12px; cursor: pointer;">
+              <div style="font-size: 20px;">&#x1F4AC;</div>
+              <div style="margin-top: 2px;">LINE</div>
+              <div style="font-size: 9px; color: #999;">メッセージ送信</div>
+            </div>
+            <div style="background: #f3e5f5; border: 1px solid #ce93d8; border-radius: 6px; text-align: center; padding: 12px 0; font-size: 12px; cursor: pointer;">
+              <div style="font-size: 20px;">&#x1F4CE;</div>
+              <div style="margin-top: 2px;">URL発行</div>
+              <div style="font-size: 9px; color: #999;">ヒアリングURL</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p style="text-align: center; font-size: 12px; color: #888;">図3: 左ペイン詳細 &mdash; 基本情報・タスク・アクションカード</p>
+
+      <h3>アクションボタン遷移先</h3>
+      <table style="width: 100%; max-width: 700px; margin: 10px auto; border-collapse: collapse; font-size: 13px;">
+        <thead>
+          <tr style="background: #f5f5f5;">
+            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">ボタン</th>
+            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">遷移先</th>
+            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">API</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px;">&#x1F4DE; 電話</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">通話記録モーダル（通話結果/メモ/時間）</td>
+            <td style="border: 1px solid #ddd; padding: 8px;"><code>POST /api/crm/communications</code></td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px;">&#x2709; メール</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">メール作成モーダル（テンプレート選択/件名/本文）</td>
+            <td style="border: 1px solid #ddd; padding: 8px;"><code>POST /api/crm/communications</code></td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px;">&#x1F4AC; LINE</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">LINE送信パネル（テキスト入力/送信）</td>
+            <td style="border: 1px solid #ddd; padding: 8px;"><code>POST /api/crm/line/send</code></td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px;">&#x1F4CE; URL発行</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">確認ダイアログ &rarr; URL表示</td>
+            <td style="border: 1px solid #ddd; padding: 8px;"><code>POST /api/crm/hearing-url</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>各APIの詳細は <a href="crm-api-sekkei.html">CRM API設計</a> を参照。</p>
+
+
+      <!-- ============================================ -->
+      <!-- H2: 右ペイン — AIプロファイル（NeedsTags）      -->
+      <!-- ============================================ -->
+      <h2 id="right-pane-ai-profile">右ペイン &mdash; AIプロファイル（NeedsTags）</h2>
+
+      <p>AIプロファイルタブでは、ヒアリング結果から自動生成された <strong>NeedsTags</strong>（顧客ニーズ分類タグ）を4カテゴリで表示する。データは <a href="crm-data-model.html">CRMデータモデル設計</a> の <code>customers.needsTags</code> フィールドに格納される。</p>
+
+      <!-- ワイヤーフレーム: AIプロファイル -->
+      <div style="border: 2px solid #333; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', sans-serif; font-size: 13px; background: #fafafa; max-width: 640px; margin: 20px auto; padding: 16px;">
+
+        <div style="font-weight: bold; font-size: 14px; margin-bottom: 12px; color: #333;">&#x1F916; AIプロファイル &mdash; NeedsTags</div>
+        <div style="font-size: 11px; color: #888; margin-bottom: 16px;">ヒアリング完了率: <span style="color: #4caf50; font-weight: bold;">100%</span> | 最終更新: 2026/03/18 14:30</div>
+
+        <!-- dealbreaker -->
+        <div style="border: 2px solid #e53935; border-radius: 8px; padding: 12px; margin-bottom: 12px; background: #ffebee;">
+          <div style="font-weight: bold; font-size: 13px; color: #e53935; margin-bottom: 8px;">&#x1F534; dealbreaker <span style="font-size: 11px; font-weight: normal; color: #999;">&mdash; 絶対NG条件</span></div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span style="background: #fff; border: 1px solid #e53935; color: #c62828; padding: 3px 10px; border-radius: 14px; font-size: 12px;">1階不可</span>
+            <span style="background: #fff; border: 1px solid #e53935; color: #c62828; padding: 3px 10px; border-radius: 14px; font-size: 12px;">築30年以上不可</span>
+            <span style="background: #fff; border: 1px solid #e53935; color: #c62828; padding: 3px 10px; border-radius: 14px; font-size: 12px;">ユニットバス不可</span>
+          </div>
+        </div>
+
+        <!-- must_haves -->
+        <div style="border: 2px solid #4caf50; border-radius: 8px; padding: 12px; margin-bottom: 12px; background: #e8f5e9;">
+          <div style="font-weight: bold; font-size: 13px; color: #2e7d32; margin-bottom: 8px;">&#x1F7E2; must_haves <span style="font-size: 11px; font-weight: normal; color: #999;">&mdash; 必須条件</span></div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span style="background: #fff; border: 1px solid #4caf50; color: #2e7d32; padding: 3px 10px; border-radius: 14px; font-size: 12px;">駅徒歩10分以内</span>
+            <span style="background: #fff; border: 1px solid #4caf50; color: #2e7d32; padding: 3px 10px; border-radius: 14px; font-size: 12px;">2LDK以上</span>
+            <span style="background: #fff; border: 1px solid #4caf50; color: #2e7d32; padding: 3px 10px; border-radius: 14px; font-size: 12px;">ペット可（犬）</span>
+            <span style="background: #fff; border: 1px solid #4caf50; color: #2e7d32; padding: 3px 10px; border-radius: 14px; font-size: 12px;">家賃15万円以内</span>
+          </div>
+        </div>
+
+        <!-- nice_to_haves -->
+        <div style="border: 2px solid #ffc107; border-radius: 8px; padding: 12px; margin-bottom: 12px; background: #fffde7;">
+          <div style="font-weight: bold; font-size: 13px; color: #f57f17; margin-bottom: 8px;">&#x1F7E1; nice_to_haves <span style="font-size: 11px; font-weight: normal; color: #999;">&mdash; あれば嬉しい</span></div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span style="background: #fff; border: 1px solid #ffc107; color: #f57f17; padding: 3px 10px; border-radius: 14px; font-size: 12px;">オートロック</span>
+            <span style="background: #fff; border: 1px solid #ffc107; color: #f57f17; padding: 3px 10px; border-radius: 14px; font-size: 12px;">宅配ボックス</span>
+            <span style="background: #fff; border: 1px solid #ffc107; color: #f57f17; padding: 3px 10px; border-radius: 14px; font-size: 12px;">浴室乾燥機</span>
+          </div>
+        </div>
+
+        <!-- dont_care -->
+        <div style="border: 1px solid #bdbdbd; border-radius: 8px; padding: 10px; margin-bottom: 12px; background: #fafafa;">
+          <div style="font-weight: bold; font-size: 13px; color: #757575; cursor: pointer;">
+            &#x26AA; dont_care <span style="font-size: 11px; font-weight: normal; color: #999;">&mdash; 気にしない</span>
+            <span style="float: right; font-size: 11px; color: #bbb;">&#x25BC; 折りたたみ</span>
+          </div>
+          <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; opacity: 0.6;">
+            <span style="background: #f5f5f5; border: 1px solid #ddd; color: #999; padding: 3px 10px; border-radius: 14px; font-size: 12px;">階数</span>
+            <span style="background: #f5f5f5; border: 1px solid #ddd; color: #999; padding: 3px 10px; border-radius: 14px; font-size: 12px;">方角</span>
+            <span style="background: #f5f5f5; border: 1px solid #ddd; color: #999; padding: 3px 10px; border-radius: 14px; font-size: 12px;">築年数（10年以内なら）</span>
+          </div>
+        </div>
+
+        <!-- 区切り線 -->
+        <hr style="border: none; border-top: 1px dashed #ddd; margin: 16px 0;">
+
+        <!-- ヒアリング未完了時のプレースホルダー表示 -->
+        <div style="font-weight: bold; font-size: 12px; color: #999; margin-bottom: 8px;">&#x26A0; ヒアリング未完了時の表示:</div>
+        <div style="border: 2px dashed #ccc; border-radius: 8px; padding: 24px; text-align: center; color: #bbb; background: #fafafa;">
+          <div style="font-size: 32px; margin-bottom: 8px;">&#x1F916;</div>
+          <div style="font-size: 13px;">AIプロファイルはヒアリング完了後に表示されます</div>
+          <div style="margin-top: 12px;">
+            <span style="background: #e3f2fd; color: #1976d2; padding: 6px 16px; border-radius: 4px; font-size: 12px; cursor: pointer;">&#x1F4CE; ヒアリングURLを発行する</span>
+          </div>
+        </div>
+      </div>
+
+      <p style="text-align: center; font-size: 12px; color: #888;">図4: AIプロファイル（NeedsTags）表示 &mdash; 4カテゴリ分類 + 未完了プレースホルダー</p>
+
+
+      <!-- ============================================ -->
+      <!-- H2: 右ペイン — タイムライン                    -->
+      <!-- ============================================ -->
+      <h2 id="right-pane-timeline">右ペイン &mdash; タイムライン</h2>
+
+      <p>概要タブに表示されるタイムラインは、顧客に関する全アクティビティを時系列で表示する。各イベントはクリックでアコーディオン展開し、詳細情報を表示する。データは <code>timeline</code> サブコレクションから取得する。</p>
+
+      <!-- ワイヤーフレーム: タイムライン -->
+      <div style="border: 2px solid #333; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', sans-serif; font-size: 13px; background: #fff; max-width: 600px; margin: 20px auto; padding: 20px 20px 20px 40px;">
+
+        <div style="font-weight: bold; font-size: 14px; margin-bottom: 16px;">&#x1F4C5; タイムライン</div>
+
+        <!-- タイムライン -->
+        <div style="position: relative; padding-left: 28px;">
+          <!-- 縦線 -->
+          <div style="position: absolute; left: 8px; top: 6px; bottom: 20px; width: 2px; background: linear-gradient(to bottom, #4caf50, #2196f3, #ff9800, #9c27b0);"></div>
+
+          <!-- イベント1: ヒアリング完了（展開済み） -->
+          <div style="position: relative; margin-bottom: 20px;">
+            <div style="position: absolute; left: -24px; top: 3px; width: 14px; height: 14px; background: #4caf50; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 2px #4caf50;"></div>
+            <div style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <span style="font-size: 11px; color: #888; min-width: 80px;">3/18 14:30</span>
+              <span style="font-size: 13px; font-weight: bold;">&#x1F7E2; ヒアリング完了</span>
+              <span style="background: #e8f5e9; color: #2e7d32; font-size: 10px; padding: 1px 6px; border-radius: 3px;">完了率100%</span>
+              <span style="font-size: 10px; color: #bbb; margin-left: auto;">&#x25B2;</span>
+            </div>
+            <!-- 展開コンテンツ -->
+            <div style="margin-top: 6px; padding: 8px; background: #f8f8f8; border-radius: 4px; border-left: 3px solid #4caf50; font-size: 12px;">
+              <div>&#x2022; 全10問中10問回答</div>
+              <div>&#x2022; NeedsTags自動生成完了</div>
+              <div>&#x2022; 推奨アクション: 来店提案電話</div>
+            </div>
+          </div>
+
+          <!-- イベント2: ヒアリングURL送付 -->
+          <div style="position: relative; margin-bottom: 20px;">
+            <div style="position: absolute; left: -24px; top: 3px; width: 14px; height: 14px; background: #2196f3; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 2px #2196f3;"></div>
+            <div style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <span style="font-size: 11px; color: #888; min-width: 80px;">3/17 10:15</span>
+              <span style="font-size: 13px;">&#x1F535; ヒアリングURL送付</span>
+              <span style="font-size: 10px; color: #bbb; margin-left: auto;">&#x25BC;</span>
+            </div>
+          </div>
+
+          <!-- イベント3: サンクスメール -->
+          <div style="position: relative; margin-bottom: 20px;">
+            <div style="position: absolute; left: -24px; top: 3px; width: 14px; height: 14px; background: #ff9800; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 2px #ff9800;"></div>
+            <div style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <span style="font-size: 11px; color: #888; min-width: 80px;">3/17 10:10</span>
+              <span style="font-size: 13px;">&#x1F4E7; サンクスメール送信</span>
+              <span style="font-size: 10px; color: #bbb; margin-left: auto;">&#x25BC;</span>
+            </div>
+          </div>
+
+          <!-- イベント4: 反響受信 -->
+          <div style="position: relative; margin-bottom: 10px;">
+            <div style="position: absolute; left: -24px; top: 3px; width: 14px; height: 14px; background: #9c27b0; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 2px #9c27b0;"></div>
+            <div style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <span style="font-size: 11px; color: #888; min-width: 80px;">3/17 09:45</span>
+              <span style="font-size: 13px;">&#x1F4E5; 反響受信 <span style="color: #666; font-size: 11px;">(SUUMO)</span></span>
+              <span style="font-size: 10px; color: #bbb; margin-left: auto;">&#x25BC;</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- もっと見る -->
+        <div style="text-align: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee;">
+          <span style="color: #1976d2; font-size: 12px; cursor: pointer;">&#x25BC; 過去のイベントを表示</span>
+        </div>
+      </div>
+
+      <p style="text-align: center; font-size: 12px; color: #888;">図5: タイムライン表示 &mdash; アコーディオン展開例</p>
+
+      <h3>タイムラインイベント種別</h3>
+      <table style="width: 100%; max-width: 700px; margin: 10px auto; border-collapse: collapse; font-size: 13px;">
+        <thead>
+          <tr style="background: #f5f5f5;">
+            <th style="border: 1px solid #ddd; padding: 8px;">カラー</th>
+            <th style="border: 1px solid #ddd; padding: 8px;">イベント種別</th>
+            <th style="border: 1px solid #ddd; padding: 8px;">説明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span style="display:inline-block;width:12px;height:12px;background:#4caf50;border-radius:50%;"></span></td><td style="border: 1px solid #ddd; padding: 8px;">ヒアリング完了</td><td style="border: 1px solid #ddd; padding: 8px;">AIヒアリング結果の反映</td></tr>
+          <tr><td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span style="display:inline-block;width:12px;height:12px;background:#2196f3;border-radius:50%;"></span></td><td style="border: 1px solid #ddd; padding: 8px;">システム操作</td><td style="border: 1px solid #ddd; padding: 8px;">URL発行・自動処理</td></tr>
+          <tr><td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span style="display:inline-block;width:12px;height:12px;background:#ff9800;border-radius:50%;"></span></td><td style="border: 1px solid #ddd; padding: 8px;">コミュニケーション</td><td style="border: 1px solid #ddd; padding: 8px;">メール・LINE・電話</td></tr>
+          <tr><td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span style="display:inline-block;width:12px;height:12px;background:#9c27b0;border-radius:50%;"></span></td><td style="border: 1px solid #ddd; padding: 8px;">反響・流入</td><td style="border: 1px solid #ddd; padding: 8px;">反響受信・来店記録</td></tr>
+          <tr><td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span style="display:inline-block;width:12px;height:12px;background:#e53935;border-radius:50%;"></span></td><td style="border: 1px solid #ddd; padding: 8px;">フェーズ遷移</td><td style="border: 1px solid #ddd; padding: 8px;">ステータス変更</td></tr>
+        </tbody>
+      </table>
+
+
+      <!-- ============================================ -->
+      <!-- H2: アクションモーダル群                       -->
+      <!-- ============================================ -->
+      <h2 id="action-modals">アクションモーダル群</h2>
+
+      <p>左ペインの4つのアクションボタンはそれぞれ専用のモーダル/パネルを起動する。以下はボタン押下からモーダル表示、API呼び出し、タイムライン反映までのフロー。</p>
+
+      <div class="mermaid">
+graph LR
+    subgraph "アクションボタン"
+        A["📞 電話"]
+        B["✉ メール"]
+        C["💬 LINE"]
+        D["📎 URL発行"]
+    end
+
+    subgraph "モーダル / パネル"
+        A --> M1["通話記録モーダル\n- 通話結果（応答/不在/折返）\n- メモ\n- 通話時間"]
+        B --> M2["メール作成モーダル\n- テンプレート選択\n- 件名\n- 本文（リッチエディタ）"]
+        C --> M3["LINE送信パネル\n- テキスト入力\n- 送信ボタン"]
+        D --> M4["確認ダイアログ\n- ヒアリングURL発行確認"]
+    end
+
+    subgraph "API呼び出し"
+        M1 --> API1["POST /communications\ntype: phone"]
+        M2 --> API2["POST /communications\ntype: email"]
+        M3 --> API3["POST /line/send"]
+        M4 --> API4["POST /hearing-url"]
+    end
+
+    subgraph "結果"
+        API1 --> R["タイムライン更新\n+ タスク自動完了"]
+        API2 --> R
+        API3 --> R
+        API4 --> R2["URL表示\n+ クリップボードコピー"]
+    end
+      </div>
+
+      <p style="text-align: center; font-size: 12px; color: #888;">図6: アクションボタン &rarr; モーダル &rarr; API &rarr; 結果 のフロー</p>
+
+      <h3>通話記録モーダル詳細</h3>
+      <!-- ワイヤーフレーム: 通話記録モーダル -->
+      <div style="border: 2px solid #333; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', sans-serif; font-size: 13px; background: rgba(0,0,0,0.05); max-width: 480px; margin: 20px auto; padding: 20px;">
+        <div style="background: #fff; border: 1px solid #ccc; border-radius: 8px; padding: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.15);">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 12px;">
+            <span style="font-weight: bold; font-size: 15px;">&#x1F4DE; 通話記録</span>
+            <span style="font-size: 18px; color: #999; cursor: pointer;">&times;</span>
+          </div>
+
+          <div style="margin-bottom: 12px;">
+            <div style="font-size: 11px; color: #999; margin-bottom: 4px;">通話結果</div>
+            <div style="display: flex; gap: 6px;">
+              <span style="background: #e8f5e9; border: 2px solid #4caf50; color: #2e7d32; padding: 6px 14px; border-radius: 4px; font-size: 12px; cursor: pointer;">応答</span>
+              <span style="background: #fff; border: 1px solid #ccc; color: #666; padding: 6px 14px; border-radius: 4px; font-size: 12px; cursor: pointer;">不在</span>
+              <span style="background: #fff; border: 1px solid #ccc; color: #666; padding: 6px 14px; border-radius: 4px; font-size: 12px; cursor: pointer;">折返依頼</span>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 12px;">
+            <div style="font-size: 11px; color: #999; margin-bottom: 4px;">通話メモ</div>
+            <div style="border: 1px solid #ccc; border-radius: 4px; padding: 8px; min-height: 60px; background: #fafafa; font-size: 12px; color: #aaa;">来店日の候補を確認。3/22(土)午後希望...</div>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <div style="font-size: 11px; color: #999; margin-bottom: 4px;">通話時間</div>
+            <div style="display: flex; gap: 8px; align-items: center; font-size: 12px;">
+              <span style="border: 1px solid #ccc; border-radius: 4px; padding: 4px 8px; background: #fafafa;">5</span>
+              <span>分</span>
+              <span style="border: 1px solid #ccc; border-radius: 4px; padding: 4px 8px; background: #fafafa;">30</span>
+              <span>秒</span>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <span style="padding: 8px 20px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; cursor: pointer; color: #666;">キャンセル</span>
+            <span style="padding: 8px 20px; background: #1976d2; color: #fff; border-radius: 4px; font-size: 12px; cursor: pointer;">保存</span>
+          </div>
+        </div>
+      </div>
+
+      <p style="text-align: center; font-size: 12px; color: #888;">図7: 通話記録モーダル ワイヤーフレーム</p>
+
+
+      <!-- ============================================ -->
+      <!-- H2: 画面状態パターン                          -->
+      <!-- ============================================ -->
+      <h2 id="gamen-state-patterns">画面状態パターン</h2>
+
+      <p>顧客カード画面は顧客のフェーズに応じて4つの状態パターンを持つ。フェーズ遷移の詳細は <a href="crm-phase-kanri.html">フェーズ管理詳細</a> を参照。</p>
+
+      <div class="mermaid">
+stateDiagram-v2
+    [*] --> 新規反響
+
+    state "① 新規反響（ヒアリング未実施）" as 新規反響 {
+        state "AIプロファイル: なし" as s1_ai
+        state "タスク: ヒアリングURL発行" as s1_task
+        state "左ペイン: 基本情報のみ" as s1_left
+        state "右ペイン: 概要タブのみ" as s1_right
+    }
+
+    state "② ヒアリング中" as ヒアリング中 {
+        state "AIプロファイル: 取得中" as s2_ai
+        state "進捗バー: XX% 表示" as s2_bar
+        state "タスク: ヒアリング催促" as s2_task
+        state "右ペイン: 概要 + 途中結果" as s2_right
+    }
+
+    state "③ ヒアリング済み" as ヒアリング済 {
+        state "AIプロファイル: 全表示" as s3_ai
+        state "NeedsTags: 4カテゴリ" as s3_tags
+        state "推奨アクション: 来店提案電話" as s3_action
+        state "タブ: 全タブ利用可能" as s3_tabs
+    }
+
+    state "④ 失注" as 失注 {
+        state "画面: グレーアウト表示" as s4_gray
+        state "失注理由: 表示" as s4_reason
+        state "再コンタクトオプション" as s4_recontact
+        state "アクション: 制限付き" as s4_action
+    }
+
+    新規反響 --> ヒアリング中: URL発行 &amp; 顧客回答開始
+    ヒアリング中 --> ヒアリング済: 回答完了（100%）
+    ヒアリング済 --> 失注: 失注処理
+    失注 --> 新規反響: 再コンタクト
+      </div>
+
+      <p style="text-align: center; font-size: 12px; color: #888;">図8: 画面状態遷移 &mdash; 4パターン</p>
+
+      <h3>各状態のUI差分</h3>
+
+      <!-- 状態比較テーブル -->
+      <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin: 10px 0;">
+        <thead>
+          <tr style="background: #f5f5f5;">
+            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">UI要素</th>
+            <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">① 新規反響</th>
+            <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">② ヒアリング中</th>
+            <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">③ ヒアリング済</th>
+            <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">④ 失注</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">PhaseTag色</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span style="background:#e3f2fd;color:#1565c0;padding:2px 6px;border-radius:8px;">青</span></td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span style="background:#fce4ec;color:#c62828;padding:2px 6px;border-radius:8px;">赤</span></td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span style="background:#e8f5e9;color:#2e7d32;padding:2px 6px;border-radius:8px;">緑</span></td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span style="background:#f5f5f5;color:#616161;padding:2px 6px;border-radius:8px;">灰</span></td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">AIプロファイルタブ</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">プレースホルダー</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">進捗バー + 途中結果</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">全NeedsTags表示</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">読み取り専用</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">タスク</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">URL発行タスク</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">催促タスク</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">来店提案タスク</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">再コンタクトタスク</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">アクションボタン</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">全て有効</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">全て有効</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">全て有効</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">電話のみ有効</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">画面色調</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">通常</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">通常</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">通常</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">グレーアウト<br><code>opacity: 0.6</code></td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">特殊表示</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">&mdash;</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">進捗バー</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">推奨アクションバナー</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">失注理由 + 再コンタクトボタン</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>失注画面ワイヤーフレーム</h3>
+      <div style="border: 2px solid #999; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', sans-serif; font-size: 13px; background: #f0f0f0; max-width: 600px; margin: 20px auto; opacity: 0.7;">
+        <div style="background: #e0e0e0; padding: 10px 16px; display: flex; align-items: center; gap: 12px;">
+          <span style="color: #999;">&larr; 戻る</span>
+          <span style="font-size: 16px; font-weight: bold; color: #666;">田中 太郎</span>
+          <span style="background: #f5f5f5; color: #616161; padding: 2px 10px; border-radius: 12px; font-size: 11px; border: 1px solid #bdbdbd;">失注</span>
+        </div>
+        <div style="padding: 16px;">
+          <div style="background: #fff3e0; border: 1px solid #ffcc80; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+            <div style="font-weight: bold; font-size: 13px; color: #e65100;">&#x26A0; 失注理由</div>
+            <div style="font-size: 12px; color: #666; margin-top: 4px;">他社で契約済み（2026/03/15）</div>
+          </div>
+          <div style="text-align: center;">
+            <span style="background: #1976d2; color: #fff; padding: 8px 24px; border-radius: 4px; font-size: 13px; cursor: pointer;">&#x1F504; 再コンタクトに戻す</span>
+          </div>
+        </div>
+      </div>
+
+      <p style="text-align: center; font-size: 12px; color: #888;">図9: 失注状態 &mdash; グレーアウト + 再コンタクトオプション</p>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#gamen-zentai-layout">画面全体レイアウト</a></li>
+          <li><a href="#header-section">ヘッダーセクション詳細</a></li>
+          <li><a href="#left-pane-basic-info">左ペイン &mdash; 基本情報パネル</a></li>
+          <li><a href="#right-pane-ai-profile">右ペイン &mdash; AIプロファイル（NeedsTags）</a></li>
+          <li><a href="#right-pane-timeline">右ペイン &mdash; タイムライン</a></li>
+          <li><a href="#action-modals">アクションモーダル群</a></li>
+          <li><a href="#gamen-state-patterns">画面状態パターン</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a> (親記事)</li>
+          <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+          <li><a href="crm-phase-kanri.html">フェーズ管理詳細</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+          <li><a href="crm-kanban-jissou.html">カンバン実装詳細</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+        <li><a href="crm-phase-kanri.html">フェーズ管理詳細</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

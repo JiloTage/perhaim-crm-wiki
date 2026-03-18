@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>カンバン画面仕様 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a> &gt; カンバン画面仕様
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">カンバン画面仕様</h1>
+      <div class="article-meta">最終更新: 2026-03-19</div>
+      <div class="article-summary">カンバンボードの画面仕様書。全体レイアウト・顧客カード・ドラッグ&ドロップ操作・フィルタツールバーのワイヤーフレーム図解と操作状態遷移を定義する。</div>
+
+      <!-- ============================================ -->
+      <!-- H2: カンバン全体レイアウト                    -->
+      <!-- ============================================ -->
+      <h2 id="kanban-zentai-layout">カンバン全体レイアウト</h2>
+
+      <p>カンバンボードは <strong>ヘッダーツールバー</strong> + <strong>横スクロールカラムコンテナ</strong> の2層構成で、8つのフェーズカラムに顧客カードを配置する。以下はワイヤーフレームによる全体再現である。</p>
+
+      <!-- ワイヤーフレーム: 全体レイアウト -->
+      <div style="border: 2px solid #333; border-radius: 8px; font-family: 'Segoe UI', sans-serif; background: #f8f9fa; padding: 0; overflow: hidden; margin: 24px 0;">
+
+        <!-- ヘッダーツールバー -->
+        <div style="background: #fff; border-bottom: 2px solid #ddd; padding: 12px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 12px; color: #666;">店舗:</span>
+            <div style="border: 1px solid #ccc; border-radius: 4px; padding: 4px 24px 4px 8px; font-size: 13px; background: #fff; position: relative;">
+              全店舗 <span style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 10px;">&#9660;</span>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 12px; color: #666;">担当者:</span>
+            <div style="border: 1px solid #ccc; border-radius: 4px; padding: 4px 24px 4px 8px; font-size: 13px; background: #fff; position: relative;">
+              全担当者 <span style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 10px;">&#9660;</span>
+            </div>
+          </div>
+          <div style="flex: 1;"></div>
+          <div style="display: flex; gap: 2px;">
+            <div style="background: #1a73e8; color: #fff; padding: 4px 12px; border-radius: 4px 0 0 4px; font-size: 12px; font-weight: bold; cursor: pointer;">カンバン</div>
+            <div style="background: #e8eaed; color: #555; padding: 4px 12px; font-size: 12px; cursor: pointer;">リスト</div>
+            <div style="background: #e8eaed; color: #555; padding: 4px 12px; border-radius: 0 4px 4px 0; font-size: 12px; cursor: pointer;">テーブル</div>
+          </div>
+          <div style="border: 1px solid #ccc; border-radius: 4px; padding: 4px 8px; font-size: 13px; background: #fff; color: #999; min-width: 160px;">&#128269; 顧客を検索...</div>
+        </div>
+
+        <!-- カラムコンテナ（横スクロール） -->
+        <div style="display: flex; gap: 8px; padding: 16px 12px; overflow-x: auto; min-height: 480px; align-items: flex-start;">
+
+          <!-- カラム: 反響 -->
+          <div style="min-width: 200px; max-width: 200px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; flex-shrink: 0;">
+            <div style="padding: 10px 12px; border-bottom: 2px solid #1a73e8; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: bold; font-size: 13px; color: #1a73e8;">反響</span>
+              <span style="background: #1a73e8; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">12</span>
+            </div>
+            <div style="padding: 8px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-left: 3px solid #d93025; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">田中 太郎</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e8f5e9; color: #2e7d32; padding: 1px 6px; border-radius: 3px; font-size: 10px;">SUUMO</span></div>
+                <div style="color: #999; font-size: 10px;">5分前 &middot; 山田</div>
+                <div style="display: flex; gap: 3px; margin-top: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #d93025; display: inline-block;"></span><span style="width: 6px; height: 6px; border-radius: 50%; background: #f9a825; display: inline-block;"></span><span style="width: 6px; height: 6px; border-radius: 50%; background: #f9a825; display: inline-block;"></span></div>
+              </div>
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-left: 3px solid #f9a825; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">佐藤 花子</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e3f2fd; color: #1565c0; padding: 1px 6px; border-radius: 3px; font-size: 10px;">HOME'S</span></div>
+                <div style="color: #999; font-size: 10px;">1時間前 &middot; 鈴木</div>
+                <div style="display: flex; gap: 3px; margin-top: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #f9a825; display: inline-block;"></span><span style="width: 6px; height: 6px; border-radius: 50%; background: #f9a825; display: inline-block;"></span></div>
+              </div>
+              <div style="background: #f5f5f5; border: 1px dashed #ccc; border-radius: 4px; padding: 12px; text-align: center; color: #bbb; font-size: 11px;">+10件</div>
+            </div>
+          </div>
+
+          <!-- カラム: ヒアリング待ち -->
+          <div style="min-width: 200px; max-width: 200px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; flex-shrink: 0;">
+            <div style="padding: 10px 12px; border-bottom: 2px solid #e8710a; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: bold; font-size: 13px; color: #e8710a;">ヒアリング待ち</span>
+              <span style="background: #e8710a; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">5</span>
+            </div>
+            <div style="padding: 8px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">鈴木 一郎</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e8f5e9; color: #2e7d32; padding: 1px 6px; border-radius: 3px; font-size: 10px;">SUUMO</span></div>
+                <div style="color: #999; font-size: 10px;">2時間前 &middot; 山田</div>
+              </div>
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">高橋 美咲</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #f3e5f5; color: #7b1fa2; padding: 1px 6px; border-radius: 3px; font-size: 10px;">手動</span></div>
+                <div style="color: #999; font-size: 10px;">1日前 &middot; 佐藤</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- カラム: ヒアリング中 -->
+          <div style="min-width: 200px; max-width: 200px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; flex-shrink: 0;">
+            <div style="padding: 10px 12px; border-bottom: 2px solid #e8710a; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: bold; font-size: 13px; color: #e8710a;">ヒアリング中</span>
+              <span style="background: #e8710a; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">3</span>
+            </div>
+            <div style="padding: 8px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">渡辺 健太</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e3f2fd; color: #1565c0; padding: 1px 6px; border-radius: 3px; font-size: 10px;">HOME'S</span></div>
+                <div style="color: #999; font-size: 10px;">30分前 &middot; 鈴木</div>
+              </div>
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">伊藤 裕子</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e8f5e9; color: #2e7d32; padding: 1px 6px; border-radius: 3px; font-size: 10px;">SUUMO</span></div>
+                <div style="color: #999; font-size: 10px;">3時間前 &middot; 山田</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- カラム: ヒアリング済み -->
+          <div style="min-width: 200px; max-width: 200px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; flex-shrink: 0;">
+            <div style="padding: 10px 12px; border-bottom: 2px solid #e8710a; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: bold; font-size: 13px; color: #e8710a;">ヒアリング済み</span>
+              <span style="background: #e8710a; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">8</span>
+            </div>
+            <div style="padding: 8px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">中村 大輔</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e8f5e9; color: #2e7d32; padding: 1px 6px; border-radius: 3px; font-size: 10px;">SUUMO</span></div>
+                <div style="color: #999; font-size: 10px;">昨日 &middot; 佐藤</div>
+              </div>
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">小林 真理</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #f3e5f5; color: #7b1fa2; padding: 1px 6px; border-radius: 3px; font-size: 10px;">手動</span></div>
+                <div style="color: #999; font-size: 10px;">2日前 &middot; 山田</div>
+              </div>
+              <div style="background: #f5f5f5; border: 1px dashed #ccc; border-radius: 4px; padding: 12px; text-align: center; color: #bbb; font-size: 11px;">+6件</div>
+            </div>
+          </div>
+
+          <!-- カラム: 来店予約 -->
+          <div style="min-width: 200px; max-width: 200px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; flex-shrink: 0;">
+            <div style="padding: 10px 12px; border-bottom: 2px solid #0d904f; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: bold; font-size: 13px; color: #0d904f;">来店予約</span>
+              <span style="background: #0d904f; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">3</span>
+            </div>
+            <div style="padding: 8px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">松本 翔</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e3f2fd; color: #1565c0; padding: 1px 6px; border-radius: 3px; font-size: 10px;">HOME'S</span></div>
+                <div style="color: #999; font-size: 10px;">3/20 14:00 &middot; 鈴木</div>
+              </div>
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">加藤 優</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e8f5e9; color: #2e7d32; padding: 1px 6px; border-radius: 3px; font-size: 10px;">SUUMO</span></div>
+                <div style="color: #999; font-size: 10px;">3/21 10:00 &middot; 山田</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- カラム: 来店済み -->
+          <div style="min-width: 200px; max-width: 200px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; flex-shrink: 0;">
+            <div style="padding: 10px 12px; border-bottom: 2px solid #0d904f; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: bold; font-size: 13px; color: #0d904f;">来店済み</span>
+              <span style="background: #0d904f; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">2</span>
+            </div>
+            <div style="padding: 8px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">吉田 恵</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e8f5e9; color: #2e7d32; padding: 1px 6px; border-radius: 3px; font-size: 10px;">SUUMO</span></div>
+                <div style="color: #999; font-size: 10px;">昨日 &middot; 佐藤</div>
+              </div>
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">山本 健一</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e3f2fd; color: #1565c0; padding: 1px 6px; border-radius: 3px; font-size: 10px;">HOME'S</span></div>
+                <div style="color: #999; font-size: 10px;">3日前 &middot; 鈴木</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- カラム: 内見 -->
+          <div style="min-width: 200px; max-width: 200px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; flex-shrink: 0;">
+            <div style="padding: 10px 12px; border-bottom: 2px solid #0d904f; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: bold; font-size: 13px; color: #0d904f;">内見</span>
+              <span style="background: #0d904f; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">1</span>
+            </div>
+            <div style="padding: 8px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">木村 亮太</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #e8f5e9; color: #2e7d32; padding: 1px 6px; border-radius: 3px; font-size: 10px;">SUUMO</span></div>
+                <div style="color: #999; font-size: 10px;">3/22 11:00 &middot; 山田</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- カラム: 申込 -->
+          <div style="min-width: 200px; max-width: 200px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; flex-shrink: 0;">
+            <div style="padding: 10px 12px; border-bottom: 2px solid #7b1fa2; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: bold; font-size: 13px; color: #7b1fa2;">申込</span>
+              <span style="background: #7b1fa2; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">1</span>
+            </div>
+            <div style="padding: 8px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                <div style="font-weight: bold; margin-bottom: 4px;">斉藤 美穂</div>
+                <div style="display: flex; gap: 4px; margin-bottom: 4px;"><span style="background: #f3e5f5; color: #7b1fa2; padding: 1px 6px; border-radius: 3px; font-size: 10px;">手動</span></div>
+                <div style="color: #999; font-size: 10px;">本日 &middot; 佐藤</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <p>カラム構成はフェーズ管理の定義に準拠し、<a href="crm-phase-kanri.html">フェーズ管理詳細</a>で定義された10段階のうち、カンバン表示対象の8フェーズを横カラムで表現する。各カラムのカラーコードは次の通り。</p>
+
+      <table>
+        <thead>
+          <tr><th>グループ</th><th>フェーズ</th><th>カラーコード</th><th>意味</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>inquiry（青）</td><td>反響</td><td style="color: #1a73e8; font-weight: bold;">#1a73e8</td><td>新規反響受付</td></tr>
+          <tr><td rowspan="3">hearing（オレンジ）</td><td>ヒアリング待ち</td><td rowspan="3" style="color: #e8710a; font-weight: bold;">#e8710a</td><td>ヒアリング未開始</td></tr>
+          <tr><td>ヒアリング中</td><td>AIヒアリング進行中</td></tr>
+          <tr><td>ヒアリング済み</td><td>ヒアリング完了</td></tr>
+          <tr><td rowspan="3">visit（緑）</td><td>来店予約</td><td rowspan="3" style="color: #0d904f; font-weight: bold;">#0d904f</td><td>来店日確定</td></tr>
+          <tr><td>来店済み</td><td>来店完了</td></tr>
+          <tr><td>内見</td><td>物件内見</td></tr>
+          <tr><td>contracted（紫）</td><td>申込</td><td style="color: #7b1fa2; font-weight: bold;">#7b1fa2</td><td>申込手続き中</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- H2: 顧客カードデザイン                       -->
+      <!-- ============================================ -->
+      <h2 id="kokyaku-card-design">顧客カードデザイン</h2>
+
+      <p>各カラム内の顧客カードは以下の情報を集約表示する。カードの左ボーダー色で優先度を視覚的に示す。</p>
+
+      <h3 id="card-kakudai">カード拡大モックアップ</h3>
+
+      <div style="display: flex; gap: 32px; flex-wrap: wrap; margin: 24px 0;">
+
+        <!-- 通常状態 -->
+        <div style="text-align: center;">
+          <div style="font-size: 12px; font-weight: bold; color: #666; margin-bottom: 8px;">通常状態</div>
+          <div style="width: 260px; background: #fff; border: 1px solid #e0e0e0; border-left: 4px solid #d93025; border-radius: 6px; padding: 14px; font-family: 'Segoe UI', sans-serif; box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: left;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+              <div style="font-weight: bold; font-size: 15px; color: #1a1a1a;">田中 太郎</div>
+              <div style="font-size: 10px; color: #999; white-space: nowrap;">5分前</div>
+            </div>
+            <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+              <span style="background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500;">SUUMO</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div style="font-size: 12px; color: #555;">担当: <strong>山田</strong></div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; padding-top: 8px; border-top: 1px solid #f0f0f0;">
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <span style="font-size: 10px; color: #999;">ニーズ:</span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #d93025; display: inline-block;" title="dealbreaker: 1件"></span>
+                <span style="font-size: 9px; color: #d93025;">1</span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #f9a825; display: inline-block; margin-left: 4px;" title="must: 2件"></span>
+                <span style="font-size: 9px; color: #f9a825;">2</span>
+              </div>
+              <div style="margin-left: auto; font-size: 10px; padding: 1px 6px; background: #fce8e6; color: #d93025; border-radius: 3px; font-weight: bold;">urgent</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ホバー状態 -->
+        <div style="text-align: center;">
+          <div style="font-size: 12px; font-weight: bold; color: #666; margin-bottom: 8px;">ホバー状態</div>
+          <div style="width: 260px; background: #fff; border: 1px solid #d0d0d0; border-left: 4px solid #f9a825; border-radius: 6px; padding: 14px; font-family: 'Segoe UI', sans-serif; box-shadow: 0 4px 12px rgba(0,0,0,0.15); text-align: left; transform: translateY(-2px);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+              <div style="font-weight: bold; font-size: 15px; color: #1a1a1a;">佐藤 花子</div>
+              <div style="font-size: 10px; color: #999; white-space: nowrap;">1時間前</div>
+            </div>
+            <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+              <span style="background: #e3f2fd; color: #1565c0; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500;">HOME'S</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div style="font-size: 12px; color: #555;">担当: <strong>鈴木</strong></div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; padding-top: 8px; border-top: 1px solid #f0f0f0;">
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <span style="font-size: 10px; color: #999;">ニーズ:</span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #f9a825; display: inline-block;"></span>
+                <span style="font-size: 9px; color: #f9a825;">2</span>
+              </div>
+              <div style="margin-left: auto; font-size: 10px; padding: 1px 6px; background: #fff3e0; color: #e65100; border-radius: 3px; font-weight: bold;">high</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ドラッグ中状態 -->
+        <div style="text-align: center;">
+          <div style="font-size: 12px; font-weight: bold; color: #666; margin-bottom: 8px;">ドラッグ中</div>
+          <div style="width: 260px; background: #fff; border: 1px solid #e0e0e0; border-left: 4px solid #1a73e8; border-radius: 6px; padding: 14px; font-family: 'Segoe UI', sans-serif; box-shadow: 0 8px 24px rgba(0,0,0,0.2); text-align: left; opacity: 0.85; transform: rotate(3deg);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+              <div style="font-weight: bold; font-size: 15px; color: #1a1a1a;">鈴木 一郎</div>
+              <div style="font-size: 10px; color: #999; white-space: nowrap;">2時間前</div>
+            </div>
+            <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+              <span style="background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500;">SUUMO</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div style="font-size: 12px; color: #555;">担当: <strong>山田</strong></div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; padding-top: 8px; border-top: 1px solid #f0f0f0;">
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <span style="font-size: 10px; color: #999;">ニーズ:</span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #f9a825; display: inline-block;"></span>
+                <span style="font-size: 9px; color: #f9a825;">1</span>
+              </div>
+              <div style="margin-left: auto; font-size: 10px; padding: 1px 6px; background: #e8eaf6; color: #283593; border-radius: 3px; font-weight: bold;">normal</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 id="card-yuso-ichiran">カード要素一覧</h3>
+
+      <table>
+        <thead>
+          <tr><th>要素</th><th>表示内容</th><th>スタイル</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>顧客名</td><td><code>customer.name</code></td><td>font-weight: bold; font-size: 15px</td></tr>
+          <tr><td>ソースバッジ</td><td>SUUMO / HOME'S / 手動</td><td>各色のpillバッジ（緑/青/紫）</td></tr>
+          <tr><td>経過時間</td><td><code>dayjs(updatedAt).fromNow()</code></td><td>font-size: 10px; color: #999</td></tr>
+          <tr><td>担当者名</td><td><code>assignee.name</code></td><td>font-size: 12px</td></tr>
+          <tr><td>ニーズドット</td><td>dealbreaker=赤、must=黄の丸ドット+件数</td><td>8px circle indicators</td></tr>
+          <tr><td>優先度</td><td>urgent / high / normal / low</td><td>左ボーダー色で表現（赤/橙/青/灰）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="card-jouken-style">カード状態別スタイル</h3>
+
+      <table>
+        <thead>
+          <tr><th>状態</th><th>border-left</th><th>box-shadow</th><th>opacity</th><th>transform</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>通常</td><td>4px solid {priority-color}</td><td>0 1px 3px rgba(0,0,0,0.1)</td><td>1.0</td><td>none</td></tr>
+          <tr><td>ホバー</td><td>4px solid {priority-color}</td><td>0 4px 12px rgba(0,0,0,0.15)</td><td>1.0</td><td>translateY(-2px)</td></tr>
+          <tr><td>ドラッグ中</td><td>4px solid {priority-color}</td><td>0 8px 24px rgba(0,0,0,0.2)</td><td>0.85</td><td>rotate(3deg)</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- H2: ドラッグ&ドロップ操作フロー               -->
+      <!-- ============================================ -->
+      <h2 id="dnd-flow">ドラッグ&ドロップ操作フロー</h2>
+
+      <p>カードのドラッグ&ドロップによるフェーズ遷移は、<strong>楽観的更新</strong>パターンを採用する。UIを即座に更新し、バックグラウンドでAPIを呼び出す。失敗時はロールバックする。詳細な実装は<a href="crm-kanban-jissou.html">カンバン実装詳細</a>を参照。</p>
+
+      <div class="mermaid">
+sequenceDiagram
+    participant U as ユーザー
+    participant UI as カンバンUI
+    participant S as 状態管理<br/>(Pinia Store)
+    participant M as 遷移理由モーダル
+    participant API as CRM API
+
+    U->>UI: カードをドラッグ開始
+    UI->>UI: カード半透明+回転(3deg)
+    UI->>UI: ドロップ先カラムをハイライト
+
+    U->>UI: カードをドロップ
+    UI->>S: 楽観的更新(moveCard)
+    S->>UI: UI即時反映(カード移動)
+
+    alt 遷移理由が必要なフェーズ変更
+        UI->>M: 遷移理由モーダル表示
+        M->>U: 理由入力を要求
+        U->>M: 理由を入力して確定
+        M->>S: 遷移理由をセット
+    end
+
+    S->>API: PATCH /customers/{id}/phase
+    Note over API: {phase, reason, assigneeId}
+
+    alt API成功(200)
+        API-->>S: 更新後データ返却
+        S->>UI: 確定表示(アニメーション)
+    else API失敗(4xx/5xx)
+        API-->>S: エラー返却
+        S->>S: ロールバック(元のカラムに戻す)
+        S->>UI: カード元位置に復帰
+        UI->>U: エラートースト表示
+    end
+      </div>
+
+      <h3 id="senni-riyu-modal">遷移理由モーダル仕様</h3>
+      <p>以下のフェーズ遷移では理由入力が<strong>必須</strong>となる。</p>
+      <table>
+        <thead>
+          <tr><th>遷移パターン</th><th>理由入力</th><th>備考</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>前方遷移（フェーズアップ）</td><td>任意</td><td>スキップ可能</td></tr>
+          <tr><td>後方遷移（フェーズダウン）</td><td><strong>必須</strong></td><td>差し戻し理由の記録</td></tr>
+          <tr><td>2段階以上のスキップ</td><td><strong>必須</strong></td><td>スキップ理由の記録</td></tr>
+          <tr><td>「失注」への遷移</td><td><strong>必須</strong></td><td>失注理由の分析用データ</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- H2: カラムヘッダー仕様                        -->
+      <!-- ============================================ -->
+      <h2 id="column-header">カラムヘッダー仕様</h2>
+
+      <p>各カラムの上部にはフェーズ名・件数・ソートボタンを表示するヘッダーを配置する。</p>
+
+      <h3 id="header-mockup">ヘッダーモックアップ</h3>
+
+      <div style="display: flex; gap: 16px; flex-wrap: wrap; margin: 24px 0;">
+
+        <!-- inquiry 青 -->
+        <div style="width: 220px; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px 8px 0 0; overflow: hidden; font-family: 'Segoe UI', sans-serif;">
+          <div style="padding: 10px 12px; border-bottom: 3px solid #1a73e8; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="width: 10px; height: 10px; border-radius: 50%; background: #1a73e8; display: inline-block;"></span>
+              <span style="font-weight: bold; font-size: 14px; color: #1a73e8;">反響</span>
+              <span style="background: #1a73e8; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">12</span>
+            </div>
+            <div style="display: flex; gap: 2px;">
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="優先度順">&#9650;</div>
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="更新日時順">&#128339;</div>
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="名前順">A</div>
+            </div>
+          </div>
+          <div style="padding: 8px; color: #ccc; font-size: 11px; text-align: center;">カード表示エリア</div>
+        </div>
+
+        <!-- hearing オレンジ -->
+        <div style="width: 220px; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px 8px 0 0; overflow: hidden; font-family: 'Segoe UI', sans-serif;">
+          <div style="padding: 10px 12px; border-bottom: 3px solid #e8710a; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="width: 10px; height: 10px; border-radius: 50%; background: #e8710a; display: inline-block;"></span>
+              <span style="font-weight: bold; font-size: 14px; color: #e8710a;">ヒアリング待ち</span>
+              <span style="background: #e8710a; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">5</span>
+            </div>
+            <div style="display: flex; gap: 2px;">
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="優先度順">&#9650;</div>
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="更新日時順">&#128339;</div>
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="名前順">A</div>
+            </div>
+          </div>
+          <div style="padding: 8px; color: #ccc; font-size: 11px; text-align: center;">カード表示エリア</div>
+        </div>
+
+        <!-- visit 緑 -->
+        <div style="width: 220px; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px 8px 0 0; overflow: hidden; font-family: 'Segoe UI', sans-serif;">
+          <div style="padding: 10px 12px; border-bottom: 3px solid #0d904f; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="width: 10px; height: 10px; border-radius: 50%; background: #0d904f; display: inline-block;"></span>
+              <span style="font-weight: bold; font-size: 14px; color: #0d904f;">来店予約</span>
+              <span style="background: #0d904f; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">3</span>
+            </div>
+            <div style="display: flex; gap: 2px;">
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="優先度順">&#9650;</div>
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="更新日時順">&#128339;</div>
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="名前順">A</div>
+            </div>
+          </div>
+          <div style="padding: 8px; color: #ccc; font-size: 11px; text-align: center;">カード表示エリア</div>
+        </div>
+
+        <!-- contracted 紫 -->
+        <div style="width: 220px; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px 8px 0 0; overflow: hidden; font-family: 'Segoe UI', sans-serif;">
+          <div style="padding: 10px 12px; border-bottom: 3px solid #7b1fa2; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="width: 10px; height: 10px; border-radius: 50%; background: #7b1fa2; display: inline-block;"></span>
+              <span style="font-weight: bold; font-size: 14px; color: #7b1fa2;">申込</span>
+              <span style="background: #7b1fa2; color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: bold;">1</span>
+            </div>
+            <div style="display: flex; gap: 2px;">
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="優先度順">&#9650;</div>
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="更新日時順">&#128339;</div>
+              <div style="width: 22px; height: 22px; border-radius: 4px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px;" title="名前順">A</div>
+            </div>
+          </div>
+          <div style="padding: 8px; color: #ccc; font-size: 11px; text-align: center;">カード表示エリア</div>
+        </div>
+      </div>
+
+      <h3 id="sort-shiyou">ソートボタン仕様</h3>
+      <table>
+        <thead>
+          <tr><th>アイコン</th><th>ソート基準</th><th>デフォルト順</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>&#9650;</td><td>優先度</td><td>urgent &gt; high &gt; normal &gt; low</td><td>優先度の高い順に上から表示</td></tr>
+          <tr><td>&#128339;</td><td>更新日時</td><td>新しい順</td><td>最終更新が新しい順</td></tr>
+          <tr><td>A</td><td>名前</td><td>五十音順</td><td>顧客名の五十音順</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
+      <!-- H2: フィルタ・ツールバー                      -->
+      <!-- ============================================ -->
+      <h2 id="filter-toolbar">フィルタ・ツールバー</h2>
+
+      <p>カンバン上部のフィルタツールバーで、表示する顧客の絞り込みと表示モードの切替を行う。</p>
+
+      <h3 id="toolbar-mockup">ツールバーモックアップ</h3>
+
+      <div style="border: 2px solid #333; border-radius: 8px; font-family: 'Segoe UI', sans-serif; background: #fff; padding: 16px 20px; margin: 24px 0;">
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+
+          <!-- 店舗セレクト -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; color: #666; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">店舗</label>
+            <div style="border: 1px solid #ccc; border-radius: 6px; padding: 8px 32px 8px 12px; font-size: 13px; background: #fafafa; position: relative; min-width: 160px;">
+              全店舗
+              <span style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 10px; color: #666;">&#9660;</span>
+            </div>
+          </div>
+
+          <!-- 担当者セレクト -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; color: #666; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">担当者</label>
+            <div style="border: 1px solid #ccc; border-radius: 6px; padding: 8px 32px 8px 12px; font-size: 13px; background: #fafafa; position: relative; min-width: 160px;">
+              全担当者
+              <span style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 10px; color: #666;">&#9660;</span>
+            </div>
+          </div>
+
+          <!-- 区切り線 -->
+          <div style="width: 1px; height: 36px; background: #e0e0e0;"></div>
+
+          <!-- 表示モード切替 -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; color: #666; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">表示モード</label>
+            <div style="display: flex; gap: 0; border: 1px solid #ccc; border-radius: 6px; overflow: hidden;">
+              <div style="background: #1a73e8; color: #fff; padding: 7px 14px; font-size: 12px; font-weight: bold; cursor: pointer;">
+                &#9638; カンバン
+              </div>
+              <div style="background: #fff; color: #555; padding: 7px 14px; font-size: 12px; cursor: pointer; border-left: 1px solid #ccc;">
+                &#9776; リスト
+              </div>
+              <div style="background: #fff; color: #555; padding: 7px 14px; font-size: 12px; cursor: pointer; border-left: 1px solid #ccc;">
+                &#9638;&#9638; テーブル
+              </div>
+            </div>
+          </div>
+
+          <!-- スペーサー -->
+          <div style="flex: 1;"></div>
+
+          <!-- 検索フィールド -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; color: #666; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">検索</label>
+            <div style="border: 1px solid #ccc; border-radius: 6px; padding: 8px 12px; font-size: 13px; background: #fafafa; min-width: 220px; color: #999; display: flex; align-items: center; gap: 8px;">
+              <span>&#128269;</span>
+              <span>顧客名・電話番号・メールで検索...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 id="filter-shiyou">フィルタ項目仕様</h3>
+      <table>
+        <thead>
+          <tr><th>フィルタ項目</th><th>型</th><th>選択肢</th><th>デフォルト</th><th>API パラメータ</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>店舗</td><td>セレクト（単一）</td><td>全店舗 + 所属店舗一覧</td><td>全店舗</td><td><code>?storeId={id}</code></td></tr>
+          <tr><td>担当者</td><td>セレクト（単一）</td><td>全担当者 + 店舗内メンバー</td><td>全担当者</td><td><code>?assigneeId={id}</code></td></tr>
+          <tr><td>表示モード</td><td>トグルグループ</td><td>カンバン / リスト / テーブル</td><td>カンバン</td><td>フロント側のみ（URLクエリ <code>?view=kanban</code>）</td></tr>
+          <tr><td>検索</td><td>テキスト入力</td><td>顧客名・電話・メール</td><td>空</td><td><code>?q={keyword}</code>（300msデバウンス）</td></tr>
+        </tbody>
+      </table>
+
+      <p>フィルタ変更時は<a href="crm-api-sekkei.html">CRM API</a>の <code>GET /api/crm/kanban</code> エンドポイントにクエリパラメータを付与してカンバンデータを再取得する。</p>
+
+      <!-- ============================================ -->
+      <!-- H2: 操作状態遷移                              -->
+      <!-- ============================================ -->
+      <h2 id="sousa-joutai-senni">操作状態遷移</h2>
+
+      <p>カンバンボードの操作状態は以下のステートマシンで管理される。@dnd-kitの各イベントと連動して状態が遷移する。</p>
+
+      <div class="mermaid">
+stateDiagram-v2
+    [*] --> idle: 初期状態
+
+    idle --> dragging: onDragStart<br/>カードをつかむ
+    dragging --> idle: onDragCancel<br/>ESCキー / 範囲外ドロップ
+    dragging --> dropped: onDragEnd<br/>カラムにドロップ
+
+    dropped --> confirming: 遷移理由が必要
+    dropped --> saving: 遷移理由不要
+
+    confirming --> saving: 理由入力して確定
+    confirming --> idle: モーダルキャンセル<br/>→ ロールバック
+
+    saving --> success: API 200 OK
+    saving --> error: API 4xx/5xx
+
+    success --> idle: 完了アニメーション後
+    error --> idle: ロールバック完了<br/>→ エラートースト表示
+
+    state idle {
+        [*] --> waiting
+        waiting: カード操作可能
+    }
+
+    state dragging {
+        [*] --> holding
+        holding: カード半透明+回転
+        holding: ドロップ先ハイライト
+    }
+
+    state saving {
+        [*] --> api_call
+        api_call: PATCH /customers/{id}/phase
+        api_call: 楽観的UI更新済み
+    }
+      </div>
+
+      <h3 id="joutai-event">状態別イベント対応表</h3>
+
+      <table>
+        <thead>
+          <tr><th>状態</th><th>トリガーイベント</th><th>UI表現</th><th>次状態</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>idle</td><td>mousedown / touchstart</td><td>カーソル: grab</td><td>dragging</td></tr>
+          <tr><td>dragging</td><td>mousemove / touchmove</td><td>カード追従、カラムハイライト</td><td>dragging</td></tr>
+          <tr><td>dragging</td><td>mouseup / touchend (有効領域)</td><td>ドロップアニメーション</td><td>dropped</td></tr>
+          <tr><td>dragging</td><td>ESC / mouseup (範囲外)</td><td>カード元位置に戻る</td><td>idle</td></tr>
+          <tr><td>dropped</td><td>(自動判定)</td><td>遷移理由モーダル or 即保存</td><td>confirming / saving</td></tr>
+          <tr><td>confirming</td><td>確定ボタン</td><td>モーダル閉じる</td><td>saving</td></tr>
+          <tr><td>confirming</td><td>キャンセル</td><td>カード元位置に復帰</td><td>idle</td></tr>
+          <tr><td>saving</td><td>API成功</td><td>チェックマークアニメーション</td><td>success</td></tr>
+          <tr><td>saving</td><td>API失敗</td><td>カード元位置+シェイクアニメーション</td><td>error</td></tr>
+          <tr><td>success</td><td>300ms後自動遷移</td><td>通常表示に復帰</td><td>idle</td></tr>
+          <tr><td>error</td><td>500ms後自動遷移</td><td>エラートースト3秒表示</td><td>idle</td></tr>
+        </tbody>
+      </table>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#kanban-zentai-layout">カンバン全体レイアウト</a></li>
+          <li><a href="#kokyaku-card-design">顧客カードデザイン</a>
+            <ul>
+              <li><a href="#card-kakudai">カード拡大モックアップ</a></li>
+              <li><a href="#card-yuso-ichiran">カード要素一覧</a></li>
+              <li><a href="#card-jouken-style">カード状態別スタイル</a></li>
+            </ul>
+          </li>
+          <li><a href="#dnd-flow">ドラッグ&ドロップ操作フロー</a>
+            <ul>
+              <li><a href="#senni-riyu-modal">遷移理由モーダル仕様</a></li>
+            </ul>
+          </li>
+          <li><a href="#column-header">カラムヘッダー仕様</a>
+            <ul>
+              <li><a href="#header-mockup">ヘッダーモックアップ</a></li>
+              <li><a href="#sort-shiyou">ソートボタン仕様</a></li>
+            </ul>
+          </li>
+          <li><a href="#filter-toolbar">フィルタ・ツールバー</a>
+            <ul>
+              <li><a href="#toolbar-mockup">ツールバーモックアップ</a></li>
+              <li><a href="#filter-shiyou">フィルタ項目仕様</a></li>
+            </ul>
+          </li>
+          <li><a href="#sousa-joutai-senni">操作状態遷移</a>
+            <ul>
+              <li><a href="#joutai-event">状態別イベント対応表</a></li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+          <li><a href="crm-kanban-jissou.html">カンバン実装詳細</a></li>
+          <li><a href="crm-phase-kanri.html">フェーズ管理詳細</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+        <li><a href="crm-kanban-jissou.html">カンバン実装詳細</a></li>
+        <li><a href="crm-phase-kanri.html">フェーズ管理詳細</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>
