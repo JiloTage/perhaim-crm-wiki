@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRM外部連携詳細 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; <a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a> &gt; CRM外部連携詳細
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">CRM外部連携詳細</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2 における<b>外部連携設計</b>の詳細仕様。<b>LINE Messaging API</b>、<b>Gmail反響取込</b>、<b>Google Calendar</b>、<b>CSVインポート</b>の4つの連携チャネルについて、アーキテクチャ・データフロー・エラーハンドリングを網羅的に定義する。すべての連携モジュールは <code>src/server/integrations/</code> に集約され、CRMビジネスロジックとは<b>疎結合</b>に保たれる。</div>
+
+      <h2 id="line-messaging-api">LINE Messaging API連携</h2>
+
+      <p>Per Heim CRMは<b>LINE公式アカウント</b>と連携し、顧客とのメッセージングを一元管理する。テナント設定画面で<b>LINE Channel Access Token</b>および<b>Channel Secret</b>を登録し、Webhook URLを通じてリアルタイムにメッセージを受信する。</p>
+
+      <h3 id="line-webhook">Webhook受信</h3>
+
+      <p>LINE PlatformからのWebhookは <code>/v1/webhook/line-message?tenant_id=xxx</code> エンドポイントで受信する。受信時の処理フローは以下の通り:</p>
+
+      <ol>
+        <li>Channel Secretを用いた<b>署名検証</b>（X-Line-Signature ヘッダー）</li>
+        <li><code>line_user_id</code> から <code>customer_id</code> への<b>マッピング解決</b></li>
+        <li>メッセージを <code>crm_communications</code> コレクションに記録</li>
+        <li><code>crm_timeline</code> にイベントとして記録</li>
+        <li>担当者への<b>リアルタイム通知</b>（Web Push + バッジ）</li>
+      </ol>
+
+      <h3 id="line-reply-push">Reply/Push API送信</h3>
+
+      <p>CRM画面からの返信は2種類のAPIを使い分ける:</p>
+
+      <table>
+        <thead>
+          <tr><th>API</th><th>用途</th><th>制約</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>Reply API</b></td><td>受信メッセージへの即時返信</td><td>replyToken有効期限内（約30秒）のみ使用可能</td></tr>
+          <tr><td><b>Push API</b></td><td>任意タイミングでのメッセージ送信</td><td>月間送信数に応じた従量課金</td></tr>
+        </tbody>
+      </table>
+
+      <p>CRM画面で担当者が返信ボタンを押下した場合、replyTokenが有効であればReply APIを優先し、期限切れの場合はPush APIにフォールバックする。</p>
+
+      <h3 id="line-user-mapping">line_user_id → customer_id マッピング</h3>
+
+      <p><code>line_user_id</code> はLINEプラットフォームが発行するユーザー固有IDである。CRM側では <code>crm_customers</code> ドキュメントの <code>line_user_id</code> フィールドでマッピングを管理する。初回メッセージ受信時にマッピングが存在しない場合は、<b>新規顧客レコードを自動作成</b>し、フェーズを <code>new</code> に設定する。</p>
+
+      <h3 id="line-1n-pattern">1:N 店舗共有パターン</h3>
+
+      <p>不動産業界では1つのLINE公式アカウントを<b>複数店舗で共有</b>するケースが一般的である。この場合の顧客振り分けロジック:</p>
+
+      <ul>
+        <li>初回メッセージ: テナント設定のデフォルト店舗、またはラウンドロビンで割当</li>
+        <li>既存顧客: <code>customer_id</code> に紐づく <code>store_id</code> の担当者にルーティング</li>
+        <li>店舗間移動: manager以上の権限で <code>store_id</code> を変更可能</li>
+      </ul>
+
+      <div class="mermaid-container"><pre class="mermaid">
+sequenceDiagram
+    participant LINE as LINE Platform
+    participant WH as /v1/webhook/line-message
+    participant INT as integrations/line.py
+    participant COMM as crm/communication.py
+    participant TL as crm/timeline.py
+    participant FS as Firestore
+    participant NOTIFY as NotificationService
+
+    LINE->>WH: POST Webhook (X-Line-Signature)
+    WH->>INT: 署名検証 + メッセージ解析
+    INT->>FS: line_user_id → customer_id 検索
+    alt マッピング存在
+        FS-->>INT: customer_id
+    else 新規ユーザー
+        INT->>FS: 新規顧客レコード作成 (phase: new)
+        FS-->>INT: new customer_id
+    end
+    INT->>COMM: メッセージ記録
+    COMM->>FS: crm_communications に保存
+    INT->>TL: タイムライン記録
+    TL->>FS: crm_timeline に保存
+    INT->>NOTIFY: 担当者通知 (push + badge)
+    WH-->>LINE: 200 OK
+      </pre></div>
+
+      <h2 id="gmail-hangyo-torikomi">Gmail反響取込</h2>
+
+      <p>SUUMO、HOME'S、at home などの<b>不動産ポータルサイト</b>からの反響メールを専用Gmailアドレスに転送し、<b>Gmail API</b>経由で自動取得・パースする。パースされた情報は <code>crm_inquiries</code> コレクションに格納され、CRMの反響受信トレイに表示される。</p>
+
+      <h3 id="mail-forward-parse">メール転送パース戦略</h3>
+
+      <p>各ポータルサイトのメールフォーマットに対応した<b>パターンマッチングパーサー</b>を実装する:</p>
+
+      <table>
+        <thead>
+          <tr><th>ポータル</th><th>パース対象</th><th>識別方法</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>SUUMO</b></td><td>顧客名、電話番号、メール、問い合わせ物件、メッセージ</td><td>送信元ドメイン + 件名パターン</td></tr>
+          <tr><td><b>HOME'S</b></td><td>顧客名、電話番号、メール、問い合わせ物件、メッセージ</td><td>送信元ドメイン + HTMLテンプレート構造</td></tr>
+          <tr><td><b>at home</b></td><td>顧客名、電話番号、メール、問い合わせ物件、メッセージ</td><td>送信元ドメイン + テキストフォーマット</td></tr>
+        </tbody>
+      </table>
+
+      <p>パーサーは <code>integrations/gmail.py</code> 内にポータル別のクラスとして実装し、新規ポータル追加時は新しいパーサークラスを追加するだけで対応可能な<b>プラグイン構造</b>とする。</p>
+
+      <h3 id="gmail-polling-vs-push">Gmail API Polling vs Push Notification</h3>
+
+      <table>
+        <thead>
+          <tr><th>方式</th><th>実装</th><th>メリット</th><th>デメリット</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>A: Gmail API Polling</b></td><td>Cloud Scheduler → Cloud Run → Gmail API</td><td>シンプル実装、運用容易</td><td>最大数分の遅延（ポーリング間隔依存）</td></tr>
+          <tr><td><b>B: Gmail Push Notification</b></td><td>Gmail → Pub/Sub → Cloud Run</td><td>リアルタイム受信</td><td>Pub/Sub設定が複雑、認証管理コスト増</td></tr>
+        </tbody>
+      </table>
+
+      <p><b>MVP判断</b>: <b>方式A（Polling、1分間隔）</b>を採用する。不動産反響は数分の遅延が許容される業務であり、実装コストと運用負荷を最小化する。リアルタイム性が必要になった段階でPub/Sub連携に移行可能。Cloud Schedulerのジョブは <code>/v1/internal/poll-gmail</code> エンドポイントを定期呼び出しする。</p>
+
+      <h3 id="parse-failure-fallback">パース失敗時のmanual_reviewフォールバック</h3>
+
+      <p>ポータルサイトのメールフォーマット変更や未対応ポータルからのメール受信時、パースが失敗する可能性がある。この場合:</p>
+
+      <ol>
+        <li>パース例外をキャッチし、<code>status: "manual_review"</code> で <code>crm_inquiries</code> に保存</li>
+        <li>元メールの件名・本文・送信元をそのまま格納（<code>raw_email</code> フィールド）</li>
+        <li>CRM反響受信トレイで「要手動確認」バッジを表示</li>
+        <li>担当者が手動で顧客情報を入力し、顧客レコードにリンク</li>
+      </ol>
+
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TD
+    A["Cloud Scheduler<br/>1分間隔トリガー"] --> B["/v1/internal/poll-gmail"]
+    B --> C["Gmail API<br/>未読メール取得"]
+    C --> D{"送信元ドメイン<br/>識別"}
+    D -->|SUUMO| E["SUUMOパーサー"]
+    D -->|HOME'S| F["HOME'Sパーサー"]
+    D -->|at home| G["at homeパーサー"]
+    D -->|不明| H["汎用パーサー"]
+    E --> I{"パース成功?"}
+    F --> I
+    G --> I
+    H --> I
+    I -->|成功| J["crm_inquiries に保存<br/>status: new"]
+    I -->|失敗| K["crm_inquiries に保存<br/>status: manual_review<br/>raw_email 格納"]
+    J --> L["自動割当<br/>assignment.py"]
+    L --> M["担当者通知<br/>inquiry_received"]
+    K --> N["要手動確認<br/>バッジ表示"]
+      </pre></div>
+
+      <h2 id="google-calendar-renkei">Google Calendar連携</h2>
+
+      <p>CRM画面での<b>来店予約登録</b>をGoogle Calendar APIと双方向同期する。カレンダーイベントの変更をWebhook通知で検知し、顧客フェーズの<b>自動遷移</b>を実現する。</p>
+
+      <h3 id="calendar-event-crud">イベントCRUD</h3>
+
+      <p>CRM画面から以下の操作をGoogle Calendar APIに同期する:</p>
+
+      <table>
+        <thead>
+          <tr><th>CRM操作</th><th>Calendar API</th><th>備考</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>来店予約登録</td><td><code>events.insert()</code></td><td>顧客名・物件名をイベントタイトルに含める</td></tr>
+          <tr><td>予約日時変更</td><td><code>events.update()</code></td><td>CRM側のタイムラインにも変更記録</td></tr>
+          <tr><td>予約キャンセル</td><td><code>events.delete()</code></td><td>フェーズを <code>visit_reserved</code> から前フェーズに戻す</td></tr>
+        </tbody>
+      </table>
+
+      <p>Google CalendarのイベントIDは <code>crm_customers</code> ドキュメントの <code>calendar_event_ids</code> 配列で管理する。1顧客に対して複数回の来店予約が可能なため、配列構造を採用する。</p>
+
+      <h3 id="calendar-webhook">Webhook通知によるフェーズ自動遷移</h3>
+
+      <p>Google Calendar APIの<b>Webhook (Push Notification)</b>を利用し、カレンダーイベントの変更をリアルタイムに検知する。Webhook URL は <code>/v1/webhook/google-calendar?tenant_id=xxx</code> とする。</p>
+
+      <p>主要なフェーズ自動遷移パターン:</p>
+
+      <table>
+        <thead>
+          <tr><th>トリガー</th><th>遷移前フェーズ</th><th>遷移後フェーズ</th><th>条件</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>来店予約作成</td><td><code>approach</code> / <code>responding</code></td><td><code>visit_reserved</code></td><td>CRM経由でイベント作成時</td></tr>
+          <tr><td>来店完了（イベント時刻経過）</td><td><code>visit_reserved</code></td><td><code>visited</code></td><td>イベント終了時刻 + バッファ時間経過</td></tr>
+          <tr><td>予約キャンセル</td><td><code>visit_reserved</code></td><td>前フェーズに復帰</td><td>イベント削除検知時</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="csv-import">CSVインポート</h2>
+
+      <p>既存顧客データや他システムからのデータ移行のため、<b>CSVファイルによる一括インポート</b>機能を提供する。フロントエンドとバックエンドの連携による<b>10ステップフロー</b>で、安全かつ確実なデータ取り込みを実現する。</p>
+
+      <h3 id="csv-10step-flow">フロントエンド/バックエンドの10ステップフロー</h3>
+
+      <table>
+        <thead>
+          <tr><th>ステップ</th><th>実行側</th><th>処理内容</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>フロントエンド</td><td><b>ファイル選択</b> — CSVファイルをドラッグ&ドロップまたはファイルダイアログで選択</td></tr>
+          <tr><td>2</td><td>フロントエンド</td><td><b>プレビュー表示</b> — 先頭10行を表形式でプレビュー、文字コード自動判定（UTF-8/Shift_JIS）</td></tr>
+          <tr><td>3</td><td>バックエンド</td><td><b>パース</b> — CSVファイルをアップロード、ヘッダー行とデータ行を分離</td></tr>
+          <tr><td>4</td><td>フロントエンド</td><td><b>カラムマッピングUI</b> — CSVカラムとCRMフィールドの対応をドラッグ&ドロップで設定</td></tr>
+          <tr><td>5</td><td>バックエンド</td><td><b>バリデーション</b> — 必須フィールド、データ型、フォーマット（電話番号・メール等）検証</td></tr>
+          <tr><td>6</td><td>バックエンド</td><td><b>重複検知</b> — 電話番号・メールアドレスによる既存顧客との重複チェック</td></tr>
+          <tr><td>7</td><td>フロントエンド</td><td><b>ドライラン確認</b> — バリデーション結果と重複候補を一覧表示、ユーザー確認</td></tr>
+          <tr><td>8</td><td>バックエンド</td><td><b>ドライラン結果</b> — 新規作成/更新/スキップの件数サマリーを返却</td></tr>
+          <tr><td>9</td><td>フロントエンド</td><td><b>インポート実行</b> — ユーザーが最終確認ボタンを押下</td></tr>
+          <tr><td>10</td><td>バックエンド</td><td><b>Bulk Insert</b> — Firestoreバッチ書き込み（500件/バッチ上限）、結果レポート返却</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="csv-column-mapping">カラムマッピング</h3>
+
+      <p>CRMの顧客フィールドとCSVカラムのマッピングは、以下の方式で柔軟に対応する:</p>
+
+      <ul>
+        <li><b>自動マッピング</b>: ヘッダー名の類似度判定（「氏名」→ <code>name</code>、「電話」→ <code>phone</code> 等）</li>
+        <li><b>手動マッピング</b>: ドラッグ&ドロップUIで任意のカラム対応を設定</li>
+        <li><b>マッピングテンプレート</b>: よく使うマッピングパターンを保存・再利用</li>
+      </ul>
+
+      <h3 id="csv-dryrun-validation">ドライラン・バリデーション</h3>
+
+      <p>本番インポート前に必ず<b>ドライラン</b>を実行し、以下を検証する:</p>
+
+      <ul>
+        <li><b>必須フィールド検証</b>: <code>name</code> は必須、<code>phone</code> または <code>email</code> のいずれかが必須</li>
+        <li><b>フォーマット検証</b>: 電話番号（正規表現）、メールアドレス（RFC準拠）、日付フォーマット</li>
+        <li><b>重複検知</b>: 電話番号・メールアドレスの完全一致で既存顧客を検索</li>
+        <li><b>結果サマリー</b>: 新規作成N件 / 更新N件 / エラーN件 / スキップN件</li>
+      </ul>
+
+      <h2 id="renkei-kiban-sekkei">連携基盤設計</h2>
+
+      <p>4つの外部連携モジュールはすべて <code>src/server/integrations/</code> ディレクトリに集約される。各モジュールは共通のエラーハンドリングパターンとリトライ戦略に従い、CRMビジネスロジック層（<code>src/server/crm/</code>）とは明確に分離される。</p>
+
+      <h3 id="integrations-directory">integrations/ ディレクトリ構造</h3>
+
+      <table>
+        <thead>
+          <tr><th>ファイル</th><th>役割</th><th>連携先</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>integrations/__init__.py</code></td><td>パッケージ初期化、共通インターフェース定義</td><td>-</td></tr>
+          <tr><td><code>integrations/line.py</code></td><td>LINE Messaging API — Webhook受信、Reply/Push送信</td><td>LINE Platform</td></tr>
+          <tr><td><code>integrations/gmail.py</code></td><td>Gmail API — 反響メール取込、ポータル別パーサー</td><td>Gmail API</td></tr>
+          <tr><td><code>integrations/google_calendar.py</code></td><td>Google Calendar API — イベント同期、Webhook受信</td><td>Google Calendar API</td></tr>
+          <tr><td><code>integrations/csv_import.py</code></td><td>CSVインポート — パース、バリデーション、Bulk Insert</td><td>ファイルアップロード</td></tr>
+        </tbody>
+      </table>
+
+      <p>各モジュールはCRMビジネスロジック層のサービス（<code>communication.py</code>、<code>inquiry.py</code>、<code>phase.py</code>、<code>customer.py</code>）を呼び出す構造とし、<b>integrations → crm</b> の一方向依存を維持する。逆方向の依存（crm → integrations）は禁止する。</p>
+
+      <h3 id="error-handling-common">エラーハンドリング共通パターン</h3>
+
+      <p>すべての外部連携モジュールは以下の共通エラーハンドリングパターンに従う:</p>
+
+      <table>
+        <thead>
+          <tr><th>エラー種別</th><th>ハンドリング方針</th><th>具体例</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>認証エラー (401/403)</b></td><td>トークンリフレッシュ試行 → 失敗時はテナント設定画面で再認証を促す通知</td><td>LINE Access Token期限切れ、Gmail OAuth失効</td></tr>
+          <tr><td><b>レート制限 (429)</b></td><td>Retry-Afterヘッダーに従ったバックオフ</td><td>LINE API送信上限、Gmail API割当超過</td></tr>
+          <tr><td><b>サーバーエラー (5xx)</b></td><td>指数バックオフリトライ（最大3回）</td><td>LINE Platform障害、Google API一時障害</td></tr>
+          <tr><td><b>パースエラー</b></td><td><code>manual_review</code> ステータスで保存、担当者通知</td><td>メールフォーマット変更、CSV不正データ</td></tr>
+          <tr><td><b>ネットワークエラー</b></td><td>指数バックオフリトライ（最大3回）+ アラート</td><td>タイムアウト、DNS解決失敗</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="retry-strategy">リトライ戦略</h3>
+
+      <p>外部API呼び出しには以下の<b>指数バックオフリトライ</b>戦略を適用する:</p>
+
+      <ul>
+        <li><b>最大リトライ回数</b>: 3回</li>
+        <li><b>初回待機時間</b>: 1秒</li>
+        <li><b>バックオフ係数</b>: 2（1秒 → 2秒 → 4秒）</li>
+        <li><b>ジッター</b>: ±500ms のランダムジッターを追加（同時リトライの衝突回避）</li>
+        <li><b>リトライ対象</b>: 5xxエラー、429エラー、ネットワークタイムアウト</li>
+        <li><b>リトライ非対象</b>: 4xxエラー（401/429除く）、パースエラー、バリデーションエラー</li>
+      </ul>
+
+      <p>3回のリトライがすべて失敗した場合は、エラーログを記録し、テナントのmanager以上に<b>エスカレーション通知</b>を送信する。Webhook受信（LINE/Calendar）の場合は200 OKを返却して再送を防止し、処理失敗を内部キューに記録して後続のバッチ処理でリカバリする。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TD
+    A["外部API呼び出し"] --> B{"レスポンス"}
+    B -->|200 OK| C["正常処理"]
+    B -->|401/403| D["トークンリフレッシュ"]
+    D -->|成功| A
+    D -->|失敗| E["再認証通知<br/>テナント設定画面へ誘導"]
+    B -->|429| F["Retry-After<br/>待機"]
+    F --> A
+    B -->|5xx / Timeout| G{"リトライ回数<br/>< 3?"}
+    G -->|Yes| H["指数バックオフ<br/>+ ジッター"]
+    H --> A
+    G -->|No| I["エラーログ記録<br/>+ エスカレーション通知"]
+    B -->|4xx その他| J["エラーログ記録<br/>処理スキップ"]
+      </pre></div>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#line-messaging-api">LINE Messaging API連携</a></li>
+          <li class="toc-h3"><a href="#line-webhook">Webhook受信</a></li>
+          <li class="toc-h3"><a href="#line-reply-push">Reply/Push API送信</a></li>
+          <li class="toc-h3"><a href="#line-user-mapping">line_user_id → customer_id マッピング</a></li>
+          <li class="toc-h3"><a href="#line-1n-pattern">1:N 店舗共有パターン</a></li>
+          <li><a href="#gmail-hangyo-torikomi">Gmail反響取込</a></li>
+          <li class="toc-h3"><a href="#mail-forward-parse">メール転送パース戦略</a></li>
+          <li class="toc-h3"><a href="#gmail-polling-vs-push">Gmail API Polling vs Push Notification</a></li>
+          <li class="toc-h3"><a href="#parse-failure-fallback">パース失敗時のmanual_reviewフォールバック</a></li>
+          <li><a href="#google-calendar-renkei">Google Calendar連携</a></li>
+          <li class="toc-h3"><a href="#calendar-event-crud">イベントCRUD</a></li>
+          <li class="toc-h3"><a href="#calendar-webhook">Webhook通知によるフェーズ自動遷移</a></li>
+          <li><a href="#csv-import">CSVインポート</a></li>
+          <li class="toc-h3"><a href="#csv-10step-flow">フロントエンド/バックエンドの10ステップフロー</a></li>
+          <li class="toc-h3"><a href="#csv-column-mapping">カラムマッピング</a></li>
+          <li class="toc-h3"><a href="#csv-dryrun-validation">ドライラン・バリデーション</a></li>
+          <li><a href="#renkei-kiban-sekkei">連携基盤設計</a></li>
+          <li class="toc-h3"><a href="#integrations-directory">integrations/ ディレクトリ構造</a></li>
+          <li class="toc-h3"><a href="#error-handling-common">エラーハンドリング共通パターン</a></li>
+          <li class="toc-h3"><a href="#retry-strategy">リトライ戦略</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+          <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+        <li><a href="crm-api-sekkei.html">CRM API設計</a></li>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

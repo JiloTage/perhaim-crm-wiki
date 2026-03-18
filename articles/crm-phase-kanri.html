@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>フェーズ管理詳細 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; <a href="crm-data-model.html">CRMデータモデル設計</a> &gt; フェーズ管理詳細
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">フェーズ管理詳細</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2における顧客フェーズ（CustomerPhase）の10段階定義、遷移ルール、遷移時の自動アクション、カンバンビューとの対応、フェーズ別KPI設計、および既存lead.statusからのマッピング戦略の詳細仕様。</div>
+
+      <p>本記事では、<a href="crm-data-model.html">CRMデータモデル設計</a>で概説された<b>CustomerPhase</b>（顧客フェーズ）の詳細仕様を解説する。Per Heim CRM v3.2 の営業プロセスは、反響受信から成約（または失注）に至るまでの<b>10段階のフェーズ</b>で管理され、<a href="crm-frontend-sekkei.html">フロントエンド</a>のカンバンビューと直接対応する。フェーズ遷移は<b>手動操作</b>（カンバンD&D / API呼び出し）と<b>自動トリガー</b>（AIヒアリング完了、カレンダーイベント等）の両方で発生し、遷移時には<b>タスク自動生成</b>・<b>タイムラインイベント記録</b>・<b>通知</b>が連動する。本記事は<a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a>のデータモデル設計およびフロントエンド設計を基に、フェーズ管理に特化した詳細仕様を記述する。</p>
+
+      <!-- セクション1: CustomerPhaseの定義 -->
+      <h2 id="customer-phase-definition">CustomerPhaseの定義</h2>
+      <p>顧客の営業進捗は <code>CustomerPhase</code> 型として以下の10値で定義される。各フェーズは不動産仲介業の営業プロセスに対応し、<b>反響受信</b>から<b>成約</b>（または<b>失注</b>）までの顧客ライフサイクルを表現する。</p>
+
+      <table>
+        <thead>
+          <tr><th>#</th><th>フェーズ値</th><th>日本語名</th><th>説明</th><th>典型的な滞留期間</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td><code>inquiry</code></td><td>反響</td><td>ポータルサイト（SUUMO・HOME'S等）や手動登録による反響受信直後の初期状態。担当者の割当と初回連絡が最優先アクションとなる。</td><td>0〜1日</td></tr>
+          <tr><td>2</td><td><code>hearing_pending</code></td><td>ヒアリング待ち</td><td>AIヒアリングURL発行済み・未開封の状態。顧客がURLを開封するのを待機している段階。</td><td>1〜3日</td></tr>
+          <tr><td>3</td><td><code>hearing_active</code></td><td>ヒアリング中</td><td>顧客がAIヒアリングURLを開封し、ヒアリングセッションが進行中の状態。</td><td>1〜7日</td></tr>
+          <tr><td>4</td><td><code>hearing_done</code></td><td>ヒアリング済み</td><td>AIヒアリングが完了し、プロファイル・ニーズタグが生成された状態。担当者によるヒアリング結果確認と来店提案が次のアクション。</td><td>1〜5日</td></tr>
+          <tr><td>5</td><td><code>visit_reserved</code></td><td>来店予約</td><td>来店日時が確定し、予約が入っている状態。来店準備（物件資料の用意等）が必要。</td><td>1〜14日</td></tr>
+          <tr><td>6</td><td><code>visited</code></td><td>来店済み</td><td>来店が完了した状態。ヒアリング結果を基に具体的な物件提案・内見設定を行う段階。</td><td>1〜7日</td></tr>
+          <tr><td>7</td><td><code>viewing</code></td><td>内見</td><td>物件内見の段階。複数物件の内見を繰り返す場合もこのフェーズに滞留する。</td><td>7〜30日</td></tr>
+          <tr><td>8</td><td><code>application</code></td><td>申込</td><td>気に入った物件が見つかり、申込手続き中の状態。審査・書類準備が進行する。</td><td>7〜14日</td></tr>
+          <tr><td>9</td><td><code>contracted</code></td><td>成約</td><td>契約完了の最終状態。KPI集計対象となるゴール地点。</td><td>（終了状態）</td></tr>
+          <tr><td>10</td><td><code>lost</code></td><td>失注</td><td>何らかの理由で案件が終了した状態。<code>lost_reason</code> フィールドに失注理由を記録する。全フェーズから遷移可能。</td><td>（終了状態）</td></tr>
+        </tbody>
+      </table>
+
+      <p>型定義としては以下の通りである:</p>
+      <pre><code>CustomerPhase = Literal[
+    "inquiry",           # 反響
+    "hearing_pending",   # ヒアリング待ち
+    "hearing_active",    # ヒアリング中
+    "hearing_done",      # ヒアリング済み
+    "visit_reserved",    # 来店予約
+    "visited",           # 来店済み
+    "viewing",           # 内見
+    "application",       # 申込
+    "contracted",        # 成約
+    "lost",              # 失注
+]</code></pre>
+
+      <!-- セクション2: フェーズ遷移ルール -->
+      <h2 id="phase-transition-rules">フェーズ遷移ルール</h2>
+      <p>フェーズ遷移には<b>許可された遷移パス</b>が定義されており、不正な遷移（例: <code>inquiry</code> から直接 <code>contracted</code>）はAPIレベルで拒否される。ただし、<b>失注（lost）</b>への遷移は全フェーズから許可される。</p>
+
+      <h3 id="transition-state-diagram">遷移状態図</h3>
+      <div class="mermaid-container"><pre class="mermaid">
+stateDiagram-v2
+    [*] --> inquiry: 反響受信
+    inquiry --> hearing_pending: ヒアリング依頼\n（URL発行）
+    hearing_pending --> hearing_active: URL開封\n（自動検知）
+    hearing_active --> hearing_done: ヒアリング完了\n（自動遷移）
+    hearing_done --> visit_reserved: 来店予約確定\n（カレンダー連携）
+    visit_reserved --> visited: 来店完了\n（手動確認）
+    visited --> viewing: 内見設定\n（物件提案）
+    viewing --> application: 申込受付
+    application --> contracted: 契約完了
+
+    inquiry --> lost: 失注
+    hearing_pending --> lost: 失注
+    hearing_active --> lost: 失注
+    hearing_done --> lost: 失注
+    visit_reserved --> lost: 失注
+    visited --> lost: 失注
+    viewing --> lost: 失注
+    application --> lost: 失注
+
+    contracted --> [*]
+    lost --> [*]
+
+    note right of inquiry: 初期状態
+    note right of contracted: ゴール
+    note right of lost: 全フェーズから遷移可
+      </pre></div>
+
+      <h3 id="allowed-transitions">許可される遷移パス</h3>
+      <p>以下の表は各フェーズから許可される遷移先を示す。<b>順方向遷移</b>（通常の営業フロー）と<b>lost遷移</b>が基本であり、スキップ遷移（例: <code>inquiry</code> → <code>visit_reserved</code>）は原則として許可しない設計である。</p>
+      <table>
+        <thead>
+          <tr><th>現在のフェーズ</th><th>許可される遷移先</th><th>備考</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>inquiry</code></td><td><code>hearing_pending</code>, <code>lost</code></td><td>URL発行をトリガーとして遷移</td></tr>
+          <tr><td><code>hearing_pending</code></td><td><code>hearing_active</code>, <code>lost</code></td><td>顧客のURL開封を自動検知</td></tr>
+          <tr><td><code>hearing_active</code></td><td><code>hearing_done</code>, <code>lost</code></td><td>セッション完了を自動検知</td></tr>
+          <tr><td><code>hearing_done</code></td><td><code>visit_reserved</code>, <code>lost</code></td><td>来店予約の確定で遷移</td></tr>
+          <tr><td><code>visit_reserved</code></td><td><code>visited</code>, <code>lost</code></td><td>来店日当日以降に手動確認</td></tr>
+          <tr><td><code>visited</code></td><td><code>viewing</code>, <code>lost</code></td><td>内見物件の提案・設定</td></tr>
+          <tr><td><code>viewing</code></td><td><code>application</code>, <code>lost</code></td><td>申込意思の確認</td></tr>
+          <tr><td><code>application</code></td><td><code>contracted</code>, <code>lost</code></td><td>審査通過・契約完了</td></tr>
+          <tr><td><code>contracted</code></td><td>（遷移なし）</td><td>最終状態</td></tr>
+          <tr><td><code>lost</code></td><td>（遷移なし）</td><td>最終状態。復活は新規顧客として再登録</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="auto-transition-triggers">自動遷移トリガー</h3>
+      <p>以下のイベントが発生した場合、システムがフェーズを自動的に遷移させる:</p>
+      <table>
+        <thead>
+          <tr><th>トリガーイベント</th><th>遷移</th><th>実装箇所</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>AIヒアリングURL開封（<code>first_opened_at</code> 設定時）</td><td><code>hearing_pending</code> → <code>hearing_active</code></td><td>既存の <code>session_open</code> エンドポイントにCRMフック追加</td></tr>
+          <tr><td>AIヒアリングセッション完了（<code>complete_session</code>）</td><td><code>hearing_active</code> → <code>hearing_done</code></td><td><code>complete_session</code> にCRMイベントフック追加（Phase 3）</td></tr>
+          <tr><td>Googleカレンダー来店予約作成</td><td><code>hearing_done</code> → <code>visit_reserved</code></td><td>Googleカレンダー連携Webhook（Phase 6）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="manual-transition">手動遷移</h3>
+      <p>手動でのフェーズ遷移は以下の2つの方法で実行できる:</p>
+      <ul>
+        <li><b>カンバンドラッグ&ドロップ</b>: カンバンビュー上でカードを隣接カラムにドラッグして遷移。内部的には <code>POST /v1/tenant/crm/kanban/move</code> APIを呼び出す。</li>
+        <li><b>フェーズ遷移API直接呼び出し</b>: <code>POST /v1/tenant/crm/customers/{customer_id}/phase</code> に <code>{ phase: CustomerPhase, reason?: string }</code> を送信。理由（reason）はlost遷移時に必須。</li>
+      </ul>
+      <p>いずれの方法でも、遷移の<b>副作用</b>（タイムラインイベント記録・自動タスク生成・通知）が同一のロジックで実行される。遷移ロジックは <code>src/server/crm/phase.py</code> に集約される。</p>
+
+      <!-- セクション3: フェーズ遷移時の自動アクション -->
+      <h2 id="auto-actions-on-transition">フェーズ遷移時の自動アクション</h2>
+      <p>フェーズ遷移が発生すると、以下の3種類の自動アクションが実行される。これらは遷移の手動/自動を問わず一律に適用される。</p>
+
+      <h3 id="auto-task-generation">タスク自動生成ルール</h3>
+      <p>遷移先フェーズに応じて、担当者の次アクションとなるタスク（<code>auto_generated: true</code>）が自動的に作成される:</p>
+      <table>
+        <thead>
+          <tr><th>遷移先フェーズ</th><th>自動生成タスク</th><th>task_type</th><th>priority</th><th>due_date</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>inquiry</code></td><td>初回連絡</td><td><code>call</code></td><td><code>high</code></td><td>当日</td></tr>
+          <tr><td><code>hearing_pending</code></td><td>ヒアリングURL送付確認</td><td><code>follow_up</code></td><td><code>normal</code></td><td>翌営業日</td></tr>
+          <tr><td><code>hearing_done</code></td><td>ヒアリング結果確認・来店提案</td><td><code>follow_up</code></td><td><code>high</code></td><td>当日</td></tr>
+          <tr><td><code>visit_reserved</code></td><td>来店準備（物件資料用意）</td><td><code>visit</code></td><td><code>high</code></td><td>来店日前日</td></tr>
+          <tr><td><code>visited</code></td><td>来店フォローアップ・内見提案</td><td><code>follow_up</code></td><td><code>high</code></td><td>来店翌営業日</td></tr>
+          <tr><td><code>viewing</code></td><td>内見後フォローアップ</td><td><code>follow_up</code></td><td><code>normal</code></td><td>内見翌営業日</td></tr>
+          <tr><td><code>application</code></td><td>申込書類確認</td><td><code>document</code></td><td><code>urgent</code></td><td>当日</td></tr>
+          <tr><td><code>contracted</code></td><td>契約後手続き案内</td><td><code>document</code></td><td><code>normal</code></td><td>3営業日後</td></tr>
+          <tr><td><code>lost</code></td><td>（タスク生成なし）</td><td>—</td><td>—</td><td>—</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="timeline-event-recording">タイムラインイベント記録</h3>
+      <p>全てのフェーズ遷移は <code>event_type: "phase_changed"</code> として<b>TimelineEvent</b>に記録される。記録される情報:</p>
+      <ul>
+        <li><code>summary</code>: 「フェーズ変更: ヒアリング待ち → ヒアリング中」のような可読テキスト</li>
+        <li><code>detail.from_phase</code>: 遷移元フェーズ</li>
+        <li><code>detail.to_phase</code>: 遷移先フェーズ</li>
+        <li><code>detail.reason</code>: 遷移理由（失注時は必須）</li>
+        <li><code>detail.trigger</code>: <code>"manual"</code> | <code>"auto"</code> | <code>"kanban_dnd"</code></li>
+        <li><code>actor_employee_id</code>: 手動遷移時の操作者ID</li>
+        <li><code>auto_generated</code>: 自動遷移の場合は <code>true</code></li>
+      </ul>
+
+      <h3 id="notification-triggers">通知トリガー</h3>
+      <p>特定のフェーズ遷移は担当者やマネージャーへの通知を発火する:</p>
+      <ul>
+        <li><b>hearing_done到達</b>: 担当者に「ヒアリング完了 — 結果を確認してください」通知</li>
+        <li><b>visit_reserved到達</b>: 担当者に「来店予約が確定しました」通知</li>
+        <li><b>application到達</b>: マネージャーに「申込案件が発生しました」通知</li>
+        <li><b>contracted到達</b>: マネージャー＋管理者に「成約しました」通知</li>
+        <li><b>lost到達</b>: マネージャーに「失注: {顧客名} — 理由: {lost_reason}」通知</li>
+      </ul>
+
+      <h3 id="auto-action-flow">自動アクションフロー図</h3>
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TD
+    A[フェーズ遷移発生] --> B{遷移元の検証}
+    B -->|許可された遷移| C[Customerドキュメント更新]
+    B -->|不正な遷移| X[❌ エラー返却]
+    C --> D[phase_changed_at 更新]
+    D --> E[タイムラインイベント記録]
+    E --> F{遷移先フェーズ判定}
+    F --> G[自動タスク生成]
+    F -->|lost| H[失注理由記録]
+    G --> I{通知対象判定}
+    H --> I
+    I -->|通知あり| J[担当者/マネージャー通知]
+    I -->|通知なし| K[完了]
+    J --> K
+
+    style X fill:#ffcccc
+    style K fill:#ccffcc
+      </pre></div>
+
+      <!-- セクション4: カンバンビューとの対応 -->
+      <h2 id="kanban-view-mapping">カンバンビューとの対応</h2>
+      <p><a href="crm-frontend-sekkei.html">フロントエンド設計</a>で定義されたカンバンビュー（<code>/crm/kanban</code>）は、CustomerPhaseの各値をカラムとして表示する。カンバンUIコンポーネントは <code>KanbanBoard.tsx</code> および <code>KanbanColumn.tsx</code> で実装される。</p>
+
+      <h3 id="column-phase-mapping">カラムとフェーズの対応</h3>
+      <p>カンバンボードには<b>lostとcontractedを除く8つのアクティブフェーズ</b>がカラムとして表示される。成約・失注は別セクション（完了済み一覧）で確認する。</p>
+      <table>
+        <thead>
+          <tr><th>表示順</th><th>カラム名</th><th>対応フェーズ</th><th>カラム背景色</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>反響</td><td><code>inquiry</code></td><td>薄い赤</td></tr>
+          <tr><td>2</td><td>ヒアリング待ち</td><td><code>hearing_pending</code></td><td>薄いオレンジ</td></tr>
+          <tr><td>3</td><td>ヒアリング中</td><td><code>hearing_active</code></td><td>薄い黄</td></tr>
+          <tr><td>4</td><td>ヒアリング済み</td><td><code>hearing_done</code></td><td>薄い黄緑</td></tr>
+          <tr><td>5</td><td>来店予約</td><td><code>visit_reserved</code></td><td>薄い緑</td></tr>
+          <tr><td>6</td><td>来店済み</td><td><code>visited</code></td><td>薄い青緑</td></tr>
+          <tr><td>7</td><td>内見</td><td><code>viewing</code></td><td>薄い青</td></tr>
+          <tr><td>8</td><td>申込</td><td><code>application</code></td><td>薄い紫</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="column-sort">カラム内ソート基準</h3>
+      <p>各カラム内のカード（顧客）は以下の優先順でソートされる:</p>
+      <ol>
+        <li><b>フェーズ滞留日数</b>（降順）: 長期滞留している顧客が上に表示され、対応漏れを防止する</li>
+        <li><b>タスク期限</b>（昇順）: 未完了タスクのうち最も期限が近いものを基準にソート</li>
+        <li><b>更新日時</b>（降順）: 直近にアクションのあった顧客を上位表示</li>
+      </ol>
+
+      <h3 id="kanban-card-info">カードに表示される情報</h3>
+      <p>各カンバンカード（<code>CustomerSummary</code>）には以下が表示される:</p>
+      <ul>
+        <li>顧客名</li>
+        <li>流入元（SUUMO / HOME'S / 手動 等のアイコン）</li>
+        <li>フェーズ滞留日数（例: 「3日前」）</li>
+        <li>担当者名</li>
+        <li>ヒアリング完了率（hearing系フェーズの場合）</li>
+        <li>来店予約日時（visit_reservedフェーズの場合）</li>
+      </ul>
+
+      <h3 id="kanban-dnd">ドラッグ&ドロップ操作</h3>
+      <p>カードのドラッグ&ドロップは<b>隣接カラムへの移動のみ</b>許可される。2つ以上離れたカラムへの直接移動や、逆方向への移動はUIレベルで制限される。D&D操作は内部的に <code>POST /v1/tenant/crm/kanban/move</code> API を呼び出し、フェーズ遷移の全副作用（タイムラインイベント・タスク生成・通知）が実行される。カンバンカラム幅は <code>--crm-kanban-column-width: 280px</code> で定義される。</p>
+
+      <!-- セクション5: フェーズ別KPI設計 -->
+      <h2 id="phase-kpi-design">フェーズ別KPI設計</h2>
+      <p>フェーズ管理データは<a href="perheim-crm-tougou-sekkei.html">統合設計書</a>の分析・レポート設計と連動し、営業パフォーマンスの定量評価に活用される。</p>
+
+      <h3 id="lead-time-measurement">リードタイム計測</h3>
+      <p>各フェーズ間の遷移にかかった日数を<b>リードタイム</b>として計測する。<code>phase_changed_at</code> の差分から算出し、<code>GET /v1/tenant/crm/analytics/lead-time</code> APIで取得できる。</p>
+      <table>
+        <thead>
+          <tr><th>遷移区間</th><th>KPI名</th><th>目標値（参考）</th><th>計測方法</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>inquiry</code> → <code>hearing_pending</code></td><td>初回対応時間</td><td>1時間以内</td><td>反響受信〜URL発行までの経過時間</td></tr>
+          <tr><td><code>hearing_pending</code> → <code>hearing_done</code></td><td>ヒアリング完了期間</td><td>3日以内</td><td>URL発行〜セッション完了</td></tr>
+          <tr><td><code>hearing_done</code> → <code>visit_reserved</code></td><td>来店予約獲得期間</td><td>5日以内</td><td>ヒアリング完了〜来店予約確定</td></tr>
+          <tr><td><code>visit_reserved</code> → <code>visited</code></td><td>来店実現期間</td><td>14日以内</td><td>予約〜来店完了</td></tr>
+          <tr><td><code>visited</code> → <code>contracted</code></td><td>成約期間</td><td>30日以内</td><td>来店〜契約完了</td></tr>
+          <tr><td><code>inquiry</code> → <code>contracted</code></td><td>全体リードタイム</td><td>60日以内</td><td>反響受信〜契約完了</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="conversion-rate">コンバージョン率</h3>
+      <p>各フェーズ間の遷移率をコンバージョン率として追跡する。ファネル分析APIは <code>GET /v1/tenant/crm/analytics/funnel</code> で提供される。</p>
+      <table>
+        <thead>
+          <tr><th>コンバージョン指標</th><th>計算式</th><th>意味</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>ヒアリング到達率</td><td>hearing_done数 / inquiry数</td><td>反響からヒアリング完了に至った割合</td></tr>
+          <tr><td>来店予約率</td><td>visit_reserved数 / hearing_done数</td><td>ヒアリング完了から来店予約に至った割合</td></tr>
+          <tr><td>来店実現率</td><td>visited数 / visit_reserved数</td><td>予約した顧客が実際に来店した割合</td></tr>
+          <tr><td>成約率（来店後）</td><td>contracted数 / visited数</td><td>来店から成約に至った割合</td></tr>
+          <tr><td>全体成約率</td><td>contracted数 / inquiry数</td><td>反響から成約に至った全体割合</td></tr>
+          <tr><td>失注率</td><td>lost数 / inquiry数</td><td>失注した全体割合</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="dual-funnel">デュアルファネルとの関係</h3>
+      <p>Per Heim CRMの分析設計では<b>デュアルファネル</b>を採用する。これはPer Heim AIヒアリングを経由した顧客と、それ以外の顧客を分離してコンバージョン率を比較するものである。ファネルAPIの <code>compare_perheim</code> パラメータで切り替え可能。</p>
+      <ul>
+        <li><b>全体ファネル（overall_funnel）</b>: 全反響からのコンバージョン率</li>
+        <li><b>Per Heimファネル（perheim_funnel）</b>: AIヒアリングを完了した顧客のみのコンバージョン率</li>
+      </ul>
+      <p>この比較により、AIヒアリング導入の<b>ROI（投資対効果）</b>を定量的に評価できる。Per Heimを経由した顧客は、ニーズの可視化により来店率・成約率が向上することが期待される。</p>
+
+      <!-- セクション6: lead.statusからのマッピング -->
+      <h2 id="lead-status-mapping">lead.statusからのマッピング</h2>
+      <p>既存の <code>lead</code> データ（招待単位のレコード）を新しい <code>Customer</code> モデルに移行する際、<code>lead.status</code> の5つの値を <code>CustomerPhase</code> にマッピングする必要がある。詳細なマイグレーション戦略は<a href="crm-data-model.html">CRMデータモデル設計</a>のマイグレーションセクションを参照。</p>
+
+      <h3 id="mapping-table">変換テーブル</h3>
+      <table>
+        <thead>
+          <tr><th>lead.status</th><th>customer.phase</th><th>マッピング根拠</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>new</code></td><td><code>hearing_pending</code></td><td>新規作成されたlead = URL発行済み・未開封状態に相当。既存leadは手動URL発行後に作成されるため、<code>inquiry</code>（反響受信直後）ではなく<code>hearing_pending</code>にマッピング。</td></tr>
+          <tr><td><code>opened</code></td><td><code>hearing_active</code></td><td>URL開封済み = ヒアリングセッション進行中に相当。<code>first_opened_at</code> が設定されている状態。</td></tr>
+          <tr><td><code>in_progress</code></td><td><code>hearing_active</code></td><td>進行中もヒアリング実行中の状態に相当。<code>opened</code> と <code>in_progress</code> はCRM上では同一フェーズとして扱う。</td></tr>
+          <tr><td><code>completed</code></td><td><code>hearing_done</code></td><td>ヒアリング完了状態に直接対応。プロファイル・ニーズタグが生成済み。</td></tr>
+          <tr><td><code>revoked</code></td><td><code>lost</code></td><td>取消（管理者による無効化）= 失注に相当。<code>lost_reason</code> に「マイグレーション: lead取消」を記録。</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="mapping-diagram">マッピング対応図</h3>
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart LR
+    subgraph "既存 lead.status（5値）"
+        LS_NEW["new"]
+        LS_OPENED["opened"]
+        LS_IP["in_progress"]
+        LS_COMP["completed"]
+        LS_REV["revoked"]
+    end
+
+    subgraph "新 CustomerPhase（10値）"
+        CP_INQ["inquiry"]
+        CP_HP["hearing_pending"]
+        CP_HA["hearing_active"]
+        CP_HD["hearing_done"]
+        CP_VR["visit_reserved"]
+        CP_V["visited"]
+        CP_VW["viewing"]
+        CP_APP["application"]
+        CP_CON["contracted"]
+        CP_LOST["lost"]
+    end
+
+    LS_NEW --> CP_HP
+    LS_OPENED --> CP_HA
+    LS_IP --> CP_HA
+    LS_COMP --> CP_HD
+    LS_REV --> CP_LOST
+
+    style CP_INQ fill:#f5f5f5,stroke:#999,stroke-dasharray: 5 5
+    style CP_VR fill:#f5f5f5,stroke:#999,stroke-dasharray: 5 5
+    style CP_V fill:#f5f5f5,stroke:#999,stroke-dasharray: 5 5
+    style CP_VW fill:#f5f5f5,stroke:#999,stroke-dasharray: 5 5
+    style CP_APP fill:#f5f5f5,stroke:#999,stroke-dasharray: 5 5
+    style CP_CON fill:#f5f5f5,stroke:#999,stroke-dasharray: 5 5
+      </pre></div>
+      <p>点線で示したフェーズ（<code>inquiry</code>, <code>visit_reserved</code>〜<code>contracted</code>）は、既存leadからのマッピング対象外であり、CRM運用開始後に新規に発生するフェーズである。既存データのマイグレーションではAIヒアリングの段階（hearing系3フェーズ + lost）にのみマッピングされる。</p>
+
+      <h3 id="mapping-implementation">マッピング実装</h3>
+      <p>マイグレーション関数の核心部分は以下の通りである:</p>
+      <pre><code>phase_map = {
+    "new": "hearing_pending",
+    "opened": "hearing_active",
+    "in_progress": "hearing_active",
+    "completed": "hearing_done",
+    "revoked": "lost",
+}
+
+customer.phase = phase_map.get(lead["status"], "inquiry")</code></pre>
+      <p>マッピングに該当しない未知のstatus値はフォールバックとして <code>inquiry</code> に設定される。初回マイグレーションは<b>1 lead = 1 customer</b>の暫定方式で実施し、同一人物の統合（merge）は<a href="crm-data-model.html">CRMデータモデル設計</a>で説明されているmerge UIおよび重複検知（Phase 5）の導入後に段階的に実施する。</p>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#customer-phase-definition">CustomerPhaseの定義</a></li>
+          <li><a href="#phase-transition-rules">フェーズ遷移ルール</a></li>
+          <li class="toc-h3"><a href="#transition-state-diagram">遷移状態図</a></li>
+          <li class="toc-h3"><a href="#allowed-transitions">許可される遷移パス</a></li>
+          <li class="toc-h3"><a href="#auto-transition-triggers">自動遷移トリガー</a></li>
+          <li class="toc-h3"><a href="#manual-transition">手動遷移</a></li>
+          <li><a href="#auto-actions-on-transition">フェーズ遷移時の自動アクション</a></li>
+          <li class="toc-h3"><a href="#auto-task-generation">タスク自動生成ルール</a></li>
+          <li class="toc-h3"><a href="#timeline-event-recording">タイムラインイベント記録</a></li>
+          <li class="toc-h3"><a href="#notification-triggers">通知トリガー</a></li>
+          <li class="toc-h3"><a href="#auto-action-flow">自動アクションフロー図</a></li>
+          <li><a href="#kanban-view-mapping">カンバンビューとの対応</a></li>
+          <li class="toc-h3"><a href="#column-phase-mapping">カラムとフェーズの対応</a></li>
+          <li class="toc-h3"><a href="#column-sort">カラム内ソート基準</a></li>
+          <li class="toc-h3"><a href="#kanban-card-info">カード表示情報</a></li>
+          <li class="toc-h3"><a href="#kanban-dnd">ドラッグ&ドロップ操作</a></li>
+          <li><a href="#phase-kpi-design">フェーズ別KPI設計</a></li>
+          <li class="toc-h3"><a href="#lead-time-measurement">リードタイム計測</a></li>
+          <li class="toc-h3"><a href="#conversion-rate">コンバージョン率</a></li>
+          <li class="toc-h3"><a href="#dual-funnel">デュアルファネル</a></li>
+          <li><a href="#lead-status-mapping">lead.statusからのマッピング</a></li>
+          <li class="toc-h3"><a href="#mapping-table">変換テーブル</a></li>
+          <li class="toc-h3"><a href="#mapping-diagram">マッピング対応図</a></li>
+          <li class="toc-h3"><a href="#mapping-implementation">マッピング実装</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+          <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+        <li><a href="crm-frontend-sekkei.html">CRMフロントエンド設計</a></li>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="crm-data-model.html">CRMデータモデル設計</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

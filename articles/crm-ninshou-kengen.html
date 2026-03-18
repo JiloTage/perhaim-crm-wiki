@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRM認証・権限詳細 - Auto-Wiki</title>
+  <link rel="stylesheet" href="../assets/css/wiki.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad: true, theme: 'neutral'});</script>
+</head>
+<body>
+<div class="wiki-wrapper">
+  <header class="wiki-header">
+    <a href="../index.html" class="site-title">Auto-Wiki</a>
+    <nav>
+      <a href="../index.html">トップ</a>
+      <a href="../index.html#article-list">記事一覧</a>
+      <a href="../index.html#graph">サイトグラフ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="../index.html">Auto-Wiki</a> &gt; <a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a> &gt; <a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a> &gt; CRM認証・権限詳細
+  </div>
+
+  <div class="wiki-content">
+    <main class="wiki-main">
+      <h1 class="article-title">CRM認証・権限詳細</h1>
+      <div class="article-meta">最終更新: 2026-03-18</div>
+      <div class="article-summary">Per Heim CRM v3.2 における<b>認証・権限設計</b>の詳細仕様。既存の<b>tenant_session_cookie</b>によるログイン境界（company/store）を維持しつつ、<b>3ロール（admin/manager/sales）</b>の業務権限レイヤーを追加し、<b>CrmActor</b>オブジェクトによるきめ細やかなアクセス制御を実現する。</div>
+
+      <h2 id="role-kakuchou-sekkei">ロール拡張設計</h2>
+
+      <p>既存の認証レイヤーは <code>tenant_session_cookie</code> の <code>login_role</code>（<code>company</code> または <code>store</code>）によるログイン境界のみを管理する。CRM統合にあたり、この<b>ログイン境界</b>と<b>業務権限</b>を明確に分離するため、<code>tenant_employees</code> コレクションの各従業員レコードに <code>role</code> フィールドを追加し、<b>admin</b>・<b>manager</b>・<b>sales</b> の3ロールで業務権限を判定する。</p>
+
+      <table>
+        <thead>
+          <tr><th>ロール</th><th>対象者</th><th>データスコープ</th><th>許可ログイン種別</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>admin</b></td><td>本社管理者</td><td>全店舗のデータ閲覧可（<code>all_stores</code>）</td><td>company のみ</td></tr>
+          <tr><td><b>manager</b></td><td>店長・マネージャー</td><td>会社 or 自店舗（<code>company_or_own_store</code>）</td><td>company / store</td></tr>
+          <tr><td><b>sales</b></td><td>営業担当者</td><td>自分の担当中心（<code>assigned_only</code>）</td><td>company / store</td></tr>
+        </tbody>
+      </table>
+
+      <p><b>設計上のポイント</b>:</p>
+      <ul>
+        <li><code>tenant_session_cookie</code> は引き続き <code>company | store</code> のログイン境界として使用する（既存機能に変更なし）</li>
+        <li>CRMの業務権限は <code>tenant_employees.role</code> の値（<code>admin | manager | sales</code>）で判定する</li>
+        <li>実際のデータアクセス範囲は <code>login_role</code> と <code>employee.role</code> の<b>組み合わせ</b>で決定する</li>
+        <li>CRM APIはすべて <code>X-Tenant-Employee-Id</code> ヘッダーを要求し、該当employeeがセッションに対して正当かを検証する</li>
+      </ul>
+
+      <div class="mermaid-container"><pre class="mermaid">
+graph TB
+    subgraph login_layer["ログイン境界（既存）"]
+        COOKIE["tenant_session_cookie"]
+        COMPANY["company<br/>本社ログイン"]
+        STORE["store<br/>店舗ログイン"]
+        COOKIE --> COMPANY
+        COOKIE --> STORE
+    end
+
+    subgraph role_layer["業務権限レイヤー（CRM追加）"]
+        EMP["tenant_employees.role"]
+        ADMIN["admin<br/>本社管理者<br/>data_scope: all_stores"]
+        MANAGER["manager<br/>店長・マネージャー<br/>data_scope: company_or_own_store"]
+        SALES["sales<br/>営業担当者<br/>data_scope: assigned_only"]
+        EMP --> ADMIN
+        EMP --> MANAGER
+        EMP --> SALES
+    end
+
+    subgraph actor_layer["CrmActor解決"]
+        ACTOR["CrmActor<br/>tenant_id + store_id +<br/>login_role + employee_id +<br/>employee_role"]
+    end
+
+    COMPANY -->|"admin のみ許可"| ADMIN
+    COMPANY -->|"company/store 両方許可"| MANAGER
+    COMPANY -->|"company/store 両方許可"| SALES
+    STORE -->|"不許可"| ADMIN
+    STORE -->|"company/store 両方許可"| MANAGER
+    STORE -->|"company/store 両方許可"| SALES
+
+    ADMIN --> ACTOR
+    MANAGER --> ACTOR
+    SALES --> ACTOR
+
+    style ADMIN fill:#e8f5e9,stroke:#2e7d32
+    style MANAGER fill:#e3f2fd,stroke:#1565c0
+    style SALES fill:#fff3e0,stroke:#e65100
+      </pre></div>
+
+      <h2 id="kengen-matrix">権限マトリクス</h2>
+
+      <p>各ロールが各リソースに対して実行できる操作を以下のマトリクスで定義する。この<b>PERMISSION_MATRIX</b>はバックエンド側で <code>crm_api.py</code> のエンドポイントごとに参照され、<code>CrmActor.employee_role</code> に基づいてアクセス可否を判定する。</p>
+
+      <table>
+        <thead>
+          <tr><th>リソース</th><th>admin</th><th>manager</th><th>sales</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>顧客（customers）</b></td><td>CRUD + merge + assign</td><td>CRU + assign</td><td>CRU</td></tr>
+          <tr><td><b>タスク（tasks）</b></td><td>CRUD + assign</td><td>CRU + assign</td><td>CRU</td></tr>
+          <tr><td><b>コミュニケーション（communications）</b></td><td>create + read</td><td>create + read</td><td>create + read</td></tr>
+          <tr><td><b>反響（inquiries）</b></td><td>read + link + ignore</td><td>read + link</td><td>read</td></tr>
+          <tr><td><b>分析（analytics）</b></td><td>read</td><td>read</td><td>-</td></tr>
+          <tr><td><b>設定（settings）</b></td><td>read + update</td><td>read</td><td>-</td></tr>
+          <tr><td><b>従業員管理（employees）</b></td><td>CRUD</td><td>-</td><td>-</td></tr>
+        </tbody>
+      </table>
+
+      <p><b>補足事項</b>:</p>
+      <ul>
+        <li><b>merge</b>: 顧客の重複統合。admin のみ実行可能（データ損失リスクがあるため）</li>
+        <li><b>assign</b>: 担当者の割当・変更。admin と manager が実行可能</li>
+        <li><b>link</b>: 反響レコードと既存顧客の紐づけ。admin と manager が実行可能</li>
+        <li><b>ignore</b>: 反響レコードの無視（スパム等）。admin のみ実行可能</li>
+        <li><b>delete</b>: 顧客・タスク・従業員の削除は admin のみ。誤操作防止のためソフトデリート推奨</li>
+        <li>コミュニケーション（LINE/メール/電話記録）は全ロールで作成・閲覧可能だが、データスコープ制御により閲覧範囲が異なる</li>
+      </ul>
+
+      <h2 id="data-scope">データスコープ制御</h2>
+
+      <p>権限マトリクスで操作種別を制御した上で、<b>データスコープ</b>により各ロールがアクセスできるデータの範囲を制限する。スコープは <code>CrmActor</code> の <code>employee_role</code> に基づいて自動決定される。</p>
+
+      <table>
+        <thead>
+          <tr><th>スコープ</th><th>対象ロール</th><th>動作仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b><code>all_stores</code></b></td>
+            <td>admin</td>
+            <td>テナント配下の<b>全店舗</b>のデータにアクセス可能。クエリに <code>store_id</code> フィルタを付与しない。分析画面では全店舗横断のKPIを表示する。</td>
+          </tr>
+          <tr>
+            <td><b><code>company_or_own_store</code></b></td>
+            <td>manager</td>
+            <td><code>login_role=company</code> の場合は全店舗データにアクセス可能。<code>login_role=store</code> の場合は<b>自店舗（<code>CrmActor.store_id</code>）</b>のデータのみ。クエリに <code>store_id</code> フィルタを条件付きで付与する。</td>
+          </tr>
+          <tr>
+            <td><b><code>assigned_only</code></b></td>
+            <td>sales</td>
+            <td>原則として<b>自分が担当する顧客・タスク</b>のみ。<code>assigned_employee_id == CrmActor.employee_id</code> でフィルタする。<code>login_role=store</code> の場合はさらに <code>store_id</code> でも制限される。未割当の反響は閲覧可能（自分で対応するため）。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p><b>スコープ判定ロジック</b>（<code>repository.py</code> 内で適用）:</p>
+
+      <pre><code># データスコープのクエリフィルタ適用
+def apply_scope_filter(query, actor: CrmActor):
+    scope = PERMISSION_MATRIX[actor.employee_role]["data_scope"]
+
+    if scope == "all_stores":
+        # admin: tenant_id のみでフィルタ（全店舗アクセス可）
+        return query.where("tenant_id", "==", actor.tenant_id)
+
+    elif scope == "company_or_own_store":
+        # manager: login_role に応じて分岐
+        if actor.login_role == "company":
+            return query.where("tenant_id", "==", actor.tenant_id)
+        else:  # store login
+            return query.where("tenant_id", "==", actor.tenant_id) \
+                        .where("store_id", "==", actor.store_id)
+
+    elif scope == "assigned_only":
+        # sales: 自分の担当のみ
+        base = query.where("tenant_id", "==", actor.tenant_id)
+        if actor.login_role == "store":
+            base = base.where("store_id", "==", actor.store_id)
+        return base.where("assigned_employee_id", "==", actor.employee_id)</code></pre>
+
+      <h2 id="crm-actor-flow">CrmActor解決フロー</h2>
+
+      <p>CRM APIは<b>Cookie単独では操作者を確定しない</b>。<code>tenant_session_cookie</code>（ログイン境界: company/store）と <code>X-Tenant-Employee-Id</code>（操作者識別）の2つを組み合わせて、<code>CrmActor</code> オブジェクトを構築する。</p>
+
+      <h3 id="resolve-process">resolve_tenant_actor() の処理手順</h3>
+
+      <ol>
+        <li><b>Cookie検証</b>: <code>request.cookies</code> から <code>tenant_session_cookie</code> を取得し、<code>_require_tenant_session(token)</code> で検証する。成功すると <code>tenant_id</code>、<code>store_id</code>、<code>login_role</code> が返る。</li>
+        <li><b>Employee検証</b>: <code>X-Tenant-Employee-Id</code> ヘッダーの値を使い、<code>_require_operator_employee(tenant_id, employee_id, store_id)</code> で従業員レコードを取得・検証する。該当する従業員が存在しない、または店舗の所属が不一致であれば 403 エラーを返す。</li>
+        <li><b>CrmActor構築</b>: 検証済みの情報をもとに <code>CrmActor</code> を生成する。<code>employee_role</code> は従業員レコードの <code>role</code> フィールドから取得し、未設定の場合はデフォルトで <code>sales</code> を適用する。</li>
+        <li><b>ログイン種別チェック</b>: <code>PERMISSION_MATRIX[employee_role]["allowed_login_roles"]</code> に <code>login_role</code> が含まれているかを検証する。例えば <code>admin</code> ロールは <code>company</code> ログインのみ許可されるため、<code>store</code> ログインからは 403 エラーとなる。</li>
+        <li><b>権限判定</b>: 各エンドポイントで <code>CrmActor.employee_role</code> と <code>PERMISSION_MATRIX</code> を照合し、操作可否を判定する。</li>
+      </ol>
+
+      <pre><code># CrmActor データ構造
+@dataclass
+class CrmActor:
+    tenant_id: str       # テナント識別子
+    store_id: str        # 店舗識別子（store ログイン時に確定）
+    login_role: str      # "company" | "store"（Cookie由来）
+    employee_id: str     # 操作者の従業員ID（ヘッダー由来）
+    employee_role: str   # "admin" | "manager" | "sales"（従業員レコード由来）</code></pre>
+
+      <div class="mermaid-container"><pre class="mermaid">
+sequenceDiagram
+    participant Client as CRM Frontend
+    participant API as crm_api.py
+    participant Resolver as resolve_tenant_actor()
+    participant InviteSales as invite_sales.repository
+    participant Firestore as Firestore
+
+    Client->>API: GET /tenant/crm/customers<br/>Cookie: tenant_session<br/>X-Tenant-Employee-Id: emp_xxx
+
+    API->>Resolver: resolve_tenant_actor(request, emp_xxx)
+
+    Note over Resolver: Step 1: Cookie検証
+    Resolver->>InviteSales: _require_tenant_session(cookie)
+    InviteSales->>Firestore: セッション検証
+    Firestore-->>InviteSales: tenant_id, store_id, login_role
+    InviteSales-->>Resolver: セッション情報
+
+    Note over Resolver: Step 2: Employee検証
+    Resolver->>InviteSales: _require_operator_employee(tenant_id, emp_xxx, store_id)
+    InviteSales->>Firestore: 従業員レコード取得
+    Firestore-->>InviteSales: employee record (role: manager)
+    InviteSales-->>Resolver: employee情報
+
+    Note over Resolver: Step 3: CrmActor構築
+    Resolver-->>API: CrmActor(tenant_id, store_id,<br/>login_role, emp_xxx, role=manager)
+
+    Note over API: Step 4: ログイン種別チェック
+    API->>API: allowed_login_roles に login_role が含まれるか確認
+
+    Note over API: Step 5: 権限マトリクス判定
+    API->>API: PERMISSION_MATRIX[manager][customers] で操作可否を判定
+    API-->>Client: 200 OK / 403 Forbidden
+      </pre></div>
+
+      <h2 id="ninshou-flow">認証フロー詳細</h2>
+
+      <h3 id="cookie-ninshou">既存Cookie認証の継続利用</h3>
+
+      <p>CRM機能の認証は既存の <code>tenant_session_cookie</code> をそのまま利用する。<b>新たなログイン画面や認証フローは追加しない</b>。ユーザーは既存の CompanyConsole または SalesConsole からログインし、CRM画面（<code>/crm</code> パス）にナビゲーションで遷移する。フロントエンドのルーティングでは <code>RequireTenantAuth</code> ガードの内側にCRMルートを配置し、未認証ユーザーのアクセスを防止する。</p>
+
+      <h3 id="crm-api-ninshou">CRM APIでのX-Tenant-Employee-Id必須化</h3>
+
+      <p>既存の <code>invite_sales</code> APIは <code>tenant_session_cookie</code> のみで操作者を特定できるが、CRM APIでは<b>操作者の粒度が従業員レベル</b>に細分化されるため、<code>X-Tenant-Employee-Id</code> ヘッダーを全エンドポイントで必須とする。</p>
+
+      <pre><code># crm_api.py - エンドポイント例
+@router.get("/tenant/crm/customers")
+def list_customers(
+    request: Request,
+    operator_employee_id: str = Depends(_header_operator_employee_id),
+):
+    actor = resolve_tenant_actor(request, operator_employee_id)
+    crm_repo = get_crm_repo()
+    return crm_repo.list_customers(actor=actor, ...)</code></pre>
+
+      <p>フロントエンドの <code>useCrmApi</code> フックは、ログイン後にローカルストレージまたはコンテキストから <code>employee_id</code> を取得し、すべてのCRM APIリクエストに <code>X-Tenant-Employee-Id</code> ヘッダーを自動付与する。</p>
+
+      <h3 id="security-kouryo">セキュリティ考慮事項</h3>
+
+      <table>
+        <thead>
+          <tr><th>脅威</th><th>対策</th><th>実装箇所</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>他人の employee_id を詐称</td>
+            <td><code>_require_operator_employee()</code> で Cookie セッションの <code>tenant_id</code>・<code>store_id</code> と従業員レコードの所属を照合</td>
+            <td><code>resolve_tenant_actor()</code></td>
+          </tr>
+          <tr>
+            <td>store ログインで admin 権限を取得</td>
+            <td><code>allowed_login_roles</code> チェックで admin は company ログインのみに制限</td>
+            <td><code>crm_api.py</code> エンドポイント</td>
+          </tr>
+          <tr>
+            <td>他店舗のデータへの不正アクセス</td>
+            <td>データスコープ制御で <code>store_id</code> フィルタを自動適用</td>
+            <td><code>repository.py</code></td>
+          </tr>
+          <tr>
+            <td>Cookie 偽造・改ざん</td>
+            <td>既存の <code>_require_tenant_session()</code> による署名検証を継続利用</td>
+            <td><code>invite_sales.repository</code></td>
+          </tr>
+          <tr>
+            <td>権限昇格（role フィールド改ざん）</td>
+            <td>role は Firestore サーバー側で管理。admin のみ <code>employees</code> リソースの CRUD が可能</td>
+            <td><code>PERMISSION_MATRIX</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p><b>Phase 0 実装における重要な設計判断</b>:</p>
+      <ul>
+        <li><code>invite_sales</code> 側に公開ヘルパー <code>resolve_tenant_actor()</code> を追加し、private メソッド（<code>_require_tenant_session</code>、<code>_require_operator_employee</code>）の直接呼び出しを避ける</li>
+        <li><code>assigned_only</code> スコープの判定は <code>employee_id</code> ベースで行い、Cookie 単独では許可しない</li>
+        <li>将来的に RBAC からABAC（属性ベースアクセス制御）への拡張パスを確保するため、<code>CrmActor</code> に属性を追加しやすいデータクラス設計とする</li>
+      </ul>
+
+    </main>
+
+    <aside class="wiki-sidebar">
+      <div class="toc">
+        <div class="toc-title">目次</div>
+        <ul class="toc-list">
+          <li><a href="#role-kakuchou-sekkei">ロール拡張設計</a></li>
+          <li><a href="#kengen-matrix">権限マトリクス</a></li>
+          <li><a href="#data-scope">データスコープ制御</a></li>
+          <li><a href="#crm-actor-flow">CrmActor解決フロー</a></li>
+          <li class="toc-h3"><a href="#resolve-process">resolve_tenant_actor() の処理手順</a></li>
+          <li><a href="#ninshou-flow">認証フロー詳細</a></li>
+          <li class="toc-h3"><a href="#cookie-ninshou">既存Cookie認証の継続利用</a></li>
+          <li class="toc-h3"><a href="#crm-api-ninshou">CRM APIでのX-Tenant-Employee-Id必須化</a></li>
+          <li class="toc-h3"><a href="#security-kouryo">セキュリティ考慮事項</a></li>
+        </ul>
+      </div>
+
+      <div class="related-articles">
+        <div class="related-title">関連記事</div>
+        <ul class="related-list">
+          <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+          <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="wiki-footer">
+    <div class="footer-links">
+      <h4>リンク先</h4>
+      <ul>
+        <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+        <li><a href="perheim-crm-tougou-sekkei.html">Per Heim CRM v3.2 統合設計書</a></li>
+      </ul>
+      <h4>被リンク</h4>
+      <ul>
+        <li><a href="hybrid-kakuchou-architecture.html">ハイブリッド拡張アーキテクチャ</a></li>
+      </ul>
+    </div>
+    <p style="margin-top:12px;">Auto-Wiki で自動生成</p>
+  </footer>
+</div>
+</body>
+</html>

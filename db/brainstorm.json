@@ -1,33 +1,6 @@
 {
   "queue": [
     {
-      "proposed_slug": "crm-ninshou-kengen",
-      "proposed_title": "CRM認証・権限詳細",
-      "parent_id": "hybrid-kakuchou-architecture",
-      "rationale": "3ロール拡張の権限マトリクス、CrmActor解決フロー、データスコープ制御の実装詳細",
-      "interestingness_score": 0.72,
-      "depth": 2,
-      "status": "queued"
-    },
-    {
-      "proposed_slug": "crm-gaibu-renkei",
-      "proposed_title": "CRM外部連携詳細",
-      "parent_id": "hybrid-kakuchou-architecture",
-      "rationale": "LINE/Gmail/Google Calendar/CSVの各統合方式の実装詳細・エラーハンドリング",
-      "interestingness_score": 0.68,
-      "depth": 2,
-      "status": "queued"
-    },
-    {
-      "proposed_slug": "crm-phase-kanri",
-      "proposed_title": "フェーズ管理詳細",
-      "parent_id": "crm-data-model",
-      "rationale": "10段階CustomerPhaseの遷移ルール、自動アクション、フェーズ別KPI設計",
-      "interestingness_score": 0.68,
-      "depth": 2,
-      "status": "queued"
-    },
-    {
       "proposed_slug": "crm-webhook-sekkei",
       "proposed_title": "Webhook設計詳細",
       "parent_id": "crm-api-sekkei",
@@ -78,6 +51,9 @@
     {"proposed_slug": "crm-data-model", "proposed_title": "CRMデータモデル設計", "status": "created"},
     {"proposed_slug": "crm-api-sekkei", "proposed_title": "CRM API設計", "status": "created"},
     {"proposed_slug": "crm-frontend-sekkei", "proposed_title": "CRMフロントエンド設計", "status": "created"},
-    {"proposed_slug": "crm-jissou-phase", "proposed_title": "CRM実装フェーズ計画", "status": "created"}
+    {"proposed_slug": "crm-jissou-phase", "proposed_title": "CRM実装フェーズ計画", "status": "created"},
+    {"proposed_slug": "crm-ninshou-kengen", "proposed_title": "CRM認証・権限詳細", "status": "created"},
+    {"proposed_slug": "crm-gaibu-renkei", "proposed_title": "CRM外部連携詳細", "status": "created"},
+    {"proposed_slug": "crm-phase-kanri", "proposed_title": "フェーズ管理詳細", "status": "created"}
   ]
 }
