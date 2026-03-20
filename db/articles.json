@@ -5,7 +5,7 @@
       "title": "Per Heim CRM v3.2 統合設計書",
       "filename": "articles/perheim-crm-tougou-sekkei.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": null,
       "depth": 0,
       "links_to": [
@@ -38,7 +38,7 @@
       "title": "ハイブリッド拡張アーキテクチャ",
       "filename": "articles/hybrid-kakuchou-architecture.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "perheim-crm-tougou-sekkei",
       "depth": 1,
       "links_to": [
@@ -62,7 +62,7 @@
       "title": "CRMデータモデル設計",
       "filename": "articles/crm-data-model.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "perheim-crm-tougou-sekkei",
       "depth": 1,
       "links_to": [
@@ -89,7 +89,7 @@
       "title": "CRM API設計",
       "filename": "articles/crm-api-sekkei.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "perheim-crm-tougou-sekkei",
       "depth": 1,
       "links_to": [
@@ -121,7 +121,7 @@
       "title": "CRMフロントエンド設計",
       "filename": "articles/crm-frontend-sekkei.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "perheim-crm-tougou-sekkei",
       "depth": 1,
       "links_to": [
@@ -150,7 +150,7 @@
       "title": "CRM実装フェーズ計画",
       "filename": "articles/crm-jissou-phase.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "perheim-crm-tougou-sekkei",
       "depth": 1,
       "links_to": [
@@ -174,7 +174,7 @@
       "title": "CRM認証・権限詳細",
       "filename": "articles/crm-ninshou-kengen.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "hybrid-kakuchou-architecture",
       "depth": 2,
       "links_to": [
@@ -194,7 +194,7 @@
       "title": "CRM外部連携詳細",
       "filename": "articles/crm-gaibu-renkei.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "hybrid-kakuchou-architecture",
       "depth": 2,
       "links_to": [
@@ -216,7 +216,7 @@
       "title": "フェーズ管理詳細",
       "filename": "articles/crm-phase-kanri.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "crm-data-model",
       "depth": 2,
       "links_to": [
@@ -241,7 +241,7 @@
       "title": "Webhook設計詳細",
       "filename": "articles/crm-webhook-sekkei.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "crm-api-sekkei",
       "depth": 2,
       "links_to": [
@@ -262,7 +262,7 @@
       "title": "通知設計詳細",
       "filename": "articles/crm-tsuchi-sekkei.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "crm-jissou-phase",
       "depth": 2,
       "links_to": [
@@ -282,7 +282,7 @@
       "title": "カンバン実装詳細",
       "filename": "articles/crm-kanban-jissou.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "crm-frontend-sekkei",
       "depth": 2,
       "links_to": [
@@ -303,7 +303,7 @@
       "title": "PII暗号化設計",
       "filename": "articles/crm-pii-angou.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "crm-data-model",
       "depth": 2,
       "links_to": [
@@ -323,7 +323,7 @@
       "title": "分析レポート詳細",
       "filename": "articles/crm-bunseki-report.html",
       "created_at": "2026-03-18T00:00:00+09:00",
-      "updated_at": "2026-03-18T00:00:00+09:00",
+      "updated_at": "2026-03-20T15:30:00+09:00",
       "parent_id": "crm-jissou-phase",
       "depth": 2,
       "links_to": [

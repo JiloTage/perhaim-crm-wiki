@@ -107,6 +107,108 @@ flowchart TD
         <li><b>監査ログ</b>: 鍵の使用はCloud Audit Logsに自動記録され、不正アクセスを検知可能</li>
       </ul>
 
+      <!-- GCP KMS エンベロープ暗号化 -->
+      <h3 id="gcp-kms-envelope">GCP KMS エンベロープ暗号化</h3>
+
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M1 対応</b>: PII暗号化における鍵管理の具体設計として、GCP KMS エンベロープ暗号化の詳細を追記する。</div>
+
+      <p>Per Heim CRMでは、PIIの暗号化鍵管理に<b>GCP Cloud KMS のエンベロープ暗号化（Envelope Encryption）</b>パターンを採用する。これにより、暗号化鍵そのものがアプリケーション外で安全に管理され、鍵の漏洩リスクを最小化する。</p>
+
+      <h4 id="dek-kek-separation">DEK / KEK の分離設計</h4>
+      <p>暗号化鍵は<b>2層構造</b>で管理する:</p>
+      <table>
+        <thead>
+          <tr><th>鍵の種類</th><th>正式名称</th><th>保管場所</th><th>用途</th><th>ライフサイクル</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>KEK</b></td><td>Key Encryption Key</td><td>GCP Cloud KMS（HSM バックエンド）</td><td>DEK の暗号化/復号</td><td>Cloud KMS が自動管理。平文は KMS 外に出ない</td></tr>
+          <tr><td><b>DEK</b></td><td>Data Encryption Key</td><td>Firestore（暗号化された状態で保存）</td><td>PII フィールドの AES-256-GCM 暗号化/復号</td><td>アプリケーションが生成し、KEK でラップして保存</td></tr>
+        </tbody>
+      </table>
+
+      <p>エンベロープ暗号化の処理フローは以下の通りである:</p>
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TD
+    subgraph 暗号化時
+        A1[アプリが DEK を生成<br/>256bit ランダム鍵] --> A2[DEK で PII を<br/>AES-256-GCM 暗号化]
+        A1 --> A3[Cloud KMS API で<br/>KEK により DEK をラップ]
+        A3 --> A4[wrapped_dek を Firestore に保存]
+        A2 --> A5[暗号文を Firestore に保存]
+    end
+
+    subgraph 復号時
+        B1[Firestore から<br/>wrapped_dek を取得] --> B2[Cloud KMS API で<br/>KEK により DEK をアンラップ]
+        B2 --> B3[平文 DEK をメモリ上で使用]
+        B3 --> B4[DEK で暗号文を復号]
+        B4 --> B5[平文 PII を返却]
+        B5 --> B6[平文 DEK をメモリから消去]
+    end
+      </pre></div>
+
+      <h4 id="kms-resource-structure">Cloud KMS リソース構成</h4>
+      <pre><code># KMS リソース階層
+projects/perheim-prod/locations/asia-northeast1/keyRings/crm-pii-keyring
+  └── cryptoKeys/tenant-kek          # テナント共通 KEK（Phase 1）
+  └── cryptoKeys/tenant-kek-{tenant_id}  # テナント別 KEK（Phase 5+）
+  └── cryptoKeys/hmac-secret-key     # 検索用ハッシュの HMAC シークレット管理用</code></pre>
+      <ul>
+        <li><b>KeyRing</b>: <code>crm-pii-keyring</code> を <code>asia-northeast1</code>（東京リージョン）に配置。データ所在地要件に準拠。</li>
+        <li><b>CryptoKey</b>: 暗号化目的（<code>ENCRYPT_DECRYPT</code>）で作成。保護レベルは <code>HSM</code>（FIPS 140-2 Level 3）を推奨。</li>
+        <li><b>CryptoKeyVersion</b>: 鍵ローテーション時に新バージョンが自動作成される。旧バージョンは復号専用として残存。</li>
+      </ul>
+
+      <h4 id="key-rotation-strategy">鍵ローテーション戦略</h4>
+      <table>
+        <thead>
+          <tr><th>対象</th><th>ローテーション周期</th><th>方式</th><th>既存データへの影響</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>KEK</b></td><td>90日（自動）</td><td>Cloud KMS の自動ローテーション機能</td><td>新規暗号化は新バージョンを使用。既存の wrapped_dek は旧バージョンで復号可能（旧バージョンは <code>ENABLED</code> 状態で維持）</td></tr>
+          <tr><td><b>DEK</b></td><td>レコード更新時（遅延ローテーション）</td><td>PII フィールド更新時に新 DEK を生成し、最新 KEK バージョンでラップ</td><td>未更新レコードは旧 DEK + 旧 KEK のまま。バッチジョブで定期的に再暗号化を推奨（四半期に1回）</td></tr>
+          <tr><td><b>HMAC Secret</b></td><td>年次（手動）</td><td>新シークレットで全ハッシュを再計算するバッチジョブを実行</td><td>ローテーション中は新旧両方のハッシュで検索する移行期間を設ける</td></tr>
+        </tbody>
+      </table>
+
+      <h4 id="tenant-key-management">テナント別暗号化鍵の管理方針</h4>
+      <p>マルチテナント環境におけるテナント間のデータ分離を暗号化レベルで保証するため、以下の段階的方針を採る:</p>
+      <table>
+        <thead>
+          <tr><th>フェーズ</th><th>方式</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>Phase 1〜4</b></td><td>共通 KEK + テナント別 DEK</td><td>KEK は全テナント共通の <code>tenant-kek</code> を使用。DEK はテナントごとに独立生成し、Firestore の <code>crm_settings/{tenant_id}</code> 内に wrapped_dek として保存する。テナント間のデータアクセスは DEK の分離により防止。</td></tr>
+          <tr><td><b>Phase 5+</b></td><td>テナント別 KEK + テナント別 DEK</td><td>高セキュリティ要件のテナントに対し、テナント専用の KEK（<code>tenant-kek-{tenant_id}</code>）を KMS 上に作成。KEK レベルでのテナント分離を実現。IAM ポリシーで他テナントの KEK へのアクセスを完全にブロック。</td></tr>
+        </tbody>
+      </table>
+
+      <pre><code class="language-python"># テナント別 DEK 管理の実装例
+class TenantKeyManager:
+    def get_or_create_dek(self, tenant_id: str) -> bytes:
+        """テナントの DEK を取得。未作成なら新規生成してラップ保存。"""
+        settings_ref = db.collection("crm_settings").document(tenant_id)
+        settings = settings_ref.get()
+
+        if settings.exists and settings.to_dict().get("wrapped_dek"):
+            # 既存 DEK をアンラップ
+            wrapped_dek = base64.b64decode(settings.to_dict()["wrapped_dek"])
+            return self.kms_client.decrypt(
+                name=self._get_kek_name(tenant_id),
+                ciphertext=wrapped_dek
+            ).plaintext
+        else:
+            # 新規 DEK を生成してラップ
+            dek = os.urandom(32)  # 256bit
+            wrapped = self.kms_client.encrypt(
+                name=self._get_kek_name(tenant_id),
+                plaintext=dek
+            ).ciphertext
+            settings_ref.set({
+                "wrapped_dek": base64.b64encode(wrapped).decode(),
+                "dek_created_at": firestore.SERVER_TIMESTAMP,
+                "kek_version": self._get_current_kek_version(tenant_id),
+            }, merge=True)
+            return dek</code></pre>
+
       <!-- 検索用ハッシュ設計 -->
       <h2 id="search-hash">検索用ハッシュ設計</h2>
 
@@ -251,6 +353,11 @@ Response: { candidates: Customer[] }</code></pre>
           <li class="toc-h3"><a href="#encryption-flow">暗号化/復号フロー</a></li>
           <li class="toc-h3"><a href="#nonce-generation">ノンス（Nonce）生成</a></li>
           <li class="toc-h3"><a href="#key-management">鍵管理（Cloud KMS連携）</a></li>
+          <li class="toc-h3"><a href="#gcp-kms-envelope">GCP KMS エンベロープ暗号化</a></li>
+          <li class="toc-h4"><a href="#dek-kek-separation">DEK / KEK の分離設計</a></li>
+          <li class="toc-h4"><a href="#kms-resource-structure">Cloud KMS リソース構成</a></li>
+          <li class="toc-h4"><a href="#key-rotation-strategy">鍵ローテーション戦略</a></li>
+          <li class="toc-h4"><a href="#tenant-key-management">テナント別暗号化鍵の管理方針</a></li>
           <li><a href="#search-hash">検索用ハッシュ設計</a></li>
           <li class="toc-h3"><a href="#hash-algorithm">ハッシュ生成アルゴリズム</a></li>
           <li class="toc-h3"><a href="#phone-normalization">電話番号正規化ルール</a></li>

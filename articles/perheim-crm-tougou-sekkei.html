@@ -144,8 +144,89 @@ erDiagram
         <li>CRM機能では<b>Firestoreネイティブコレクション</b>を使用（単一ドキュメント方式から脱却）</li>
       </ol>
 
-      <h2 id="kibo-mitoshi">規模見通し</h2>
-      <p>全8フェーズ（Phase 0〜7）で合計<b>約16〜23週（4〜6ヶ月）</b>の実装期間を見込む。最小MVP（Phase 1〜3: 顧客管理 + タスク管理 + AI統合）は約4〜7週で提供可能。詳細は<a href="crm-jissou-phase.html">CRM実装フェーズ計画</a>を参照。</p>
+      <h2 id="kibo-mitoshi">規模見通し（修正後）</h2>
+
+      <div class="notice notice-critical" style="border-left:4px solid #d32f2f; background:#fff3f3; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 #35 対応</b>: チームレビューの結果、工数見積もりを修正。Critical/High 指摘の解決に伴い、Phase 0 と Phase 1 の工数が増加。ただし外部リリース（Step 1: AI Dashboard）は 8-10 週目で可能。
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Phase</th><th>元見積</th><th>修正見積</th><th>差分理由</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Phase 0</td><td>3-5日</td><td><b>7-10日</b></td><td>C3(セッション埋め込み)+C4(CrmRepo基盤)+共有コンポーネント抽出+Go条件解消</td></tr>
+          <tr><td>Phase 1</td><td>2-3週</td><td><b>3-4週</b></td><td>カンバン D&D + lead↔customer 同期 + Firestore トランザクション</td></tr>
+          <tr><td>Phase 2</td><td>1-2週</td><td>1-2週</td><td>変更なし（Phase 3 と並行可能）</td></tr>
+          <tr><td>Phase 3</td><td>1-2週</td><td><b>2-3週</b></td><td>Cloud Tasks フック + E2E テスト + HearingCompletionEvent 契約検証</td></tr>
+          <tr><td>Phase 4</td><td>3-4週</td><td><b>4-6週</b></td><td>LINE API 審査待ち + PII暗号化をこの前に実装</td></tr>
+          <tr><td>Phase 5</td><td>3-4週</td><td>4-5週</td><td>メールパーサーのエッジケース</td></tr>
+          <tr><td>Phase 6</td><td>2-3週</td><td>2-3週</td><td>変更なし</td></tr>
+          <tr><td>Phase 7</td><td>3-4週</td><td>3-4週</td><td>変更なし</td></tr>
+          <tr><td><b>合計</b></td><td><b>16-23週</b></td><td><b>22-30週 (5.5-7.5ヶ月)</b></td><td></td></tr>
+        </tbody>
+      </table>
+
+      <p>詳細は<a href="crm-jissou-phase.html">CRM実装フェーズ計画</a>を参照。</p>
+
+      <h2 id="gtm-strategy">GTM戦略: AI Hearing Dashboard → Full CRM</h2>
+
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 #34 対応</b>: 設計書は「フルCRM」を前提としているが、GTM としてはまず「AI Hearing Dashboard」として出すべき。段階リリースにより早期に市場検証を行う。
+      </div>
+
+      <p>設計書の前提は「Per Heim CRM」としてフル CRM をリリースすることだが、レビューチームは<b>段階的リリース戦略</b>を推奨する。既存 CRM（カナリー等）と<b>併用する companion mode</b> から開始し、データ実証後に Full CRM に切り替える。</p>
+
+      <h3 id="gtm-release-sequence">推奨リリースシーケンス</h3>
+
+      <table>
+        <thead>
+          <tr><th>Step</th><th>内容</th><th>期間</th><th>ポジショニング</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Step 1</b></td>
+            <td>AI Hearing Dashboard (Phase 0+1+3)<br/>既存 CRM 併用。AI プロファイル + ニーズ構造タグ + カンバン</td>
+            <td>~8-10週</td>
+            <td>「AI が学んだ顧客理解を可視化」</td>
+          </tr>
+          <tr>
+            <td><b>Step 2</b></td>
+            <td>+ タスク管理 (Phase 2)<br/>「次に何をすべきか」を管理</td>
+            <td>+2週</td>
+            <td>Dashboard + タスク</td>
+          </tr>
+          <tr>
+            <td><b>Step 3</b></td>
+            <td>+ 追客 (Phase 4)<br/>通話記録、メール、LINE</td>
+            <td>+4-6週</td>
+            <td>CRM 単独利用が可能に</td>
+          </tr>
+          <tr>
+            <td><b>Step 4</b></td>
+            <td>Full CRM (Phase 5-7)<br/>反響自動取込、分析、連携</td>
+            <td>+8-12週</td>
+            <td>「Per Heim CRM」に切替</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="gtm-companion-mode">Companion Mode（併用モード）のユーザーストーリー</h3>
+
+      <p><b>担当者の1日</b>:</p>
+      <ol>
+        <li>朝 — 既存 CRM で反響確認 → Per Heim Dashboard でタスク確認</li>
+        <li>新規反響 → 既存 CRM で対応 → Per Heim で AI ヒアリング URL 発行</li>
+        <li>ヒアリング完了通知 → Dashboard で AI プロファイル確認 → 物件提案準備</li>
+        <li>電話 → 既存 CRM に通話記録（Phase 4 以降は Per Heim CRM 内で完結）</li>
+      </ol>
+
+      <p><b>管理者の1日</b>:</p>
+      <ol>
+        <li>朝 — Dashboard でカンバン確認（ヒアリング進捗）</li>
+        <li>AI プロファイル完了率の確認</li>
+        <li>月次 — Per Heim 効果測定（Phase 6 以降）</li>
+      </ol>
 
     </main>
 
@@ -162,7 +243,10 @@ erDiagram
           <li><a href="#lead-customer">最大の設計課題: lead → customer 変換</a></li>
           <li><a href="#sekkei-gaiyo">設計領域の概要</a></li>
           <li><a href="#housin">基本方針</a></li>
-          <li><a href="#kibo-mitoshi">規模見通し</a></li>
+          <li><a href="#kibo-mitoshi">規模見通し（修正後）</a></li>
+          <li><a href="#gtm-strategy">GTM戦略</a></li>
+          <li class="toc-h3"><a href="#gtm-release-sequence">推奨リリースシーケンス</a></li>
+          <li class="toc-h3"><a href="#gtm-companion-mode">Companion Mode</a></li>
         </ul>
       </div>
 

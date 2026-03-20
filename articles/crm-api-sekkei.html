@@ -111,21 +111,47 @@ graph LR
         <li><code>assigned_to</code>: 担当者IDでフィルタ</li>
         <li><code>store_id</code>: 店舗IDでフィルタ</li>
         <li><code>sort</code>: ソート指定（<code>updated_at</code>, <code>created_at</code>, <code>name</code>）</li>
-        <li><code>page</code>, <code>limit</code>: ページネーション（デフォルト: <code>page=1</code>, <code>limit=50</code>）</li>
+        <li><code>cursor</code>, <code>limit</code>: カーソルベースページネーション（デフォルト: <code>limit=50</code>）</li>
       </ul>
+
+      <h3 id="customer-list-pagination">顧客一覧のカーソルベースページネーション</h3>
+
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M3 対応</b>: 顧客一覧のページネーションを offset ベースから cursor ベースに変更する。Firestore は offset ベースのページネーションが非効率（スキップ対象のドキュメントもすべて読み取り課金される）であるため。</div>
+
+      <p>Firestore の <code>offset()</code> は指定位置までの全ドキュメントを内部的に読み取るため、ページが深くなるほどレイテンシとコストが増大する。これを回避するため、<b>cursor-based pagination</b> を採用する。</p>
+
+      <ul>
+        <li><b>方式</b>: Firestore の <code>startAfter(last_document)</code> を使用し、前ページ最後のドキュメントの後から取得する</li>
+        <li><b>ソートキー</b>: <code>updated_at DESC</code>（デフォルト）。ソート指定に応じてカーソルのキーも変動する</li>
+        <li><b>APIレスポンス</b>に <code>next_cursor</code> フィールドを追加し、次ページ取得に使用する</li>
+        <li><b>リクエスト例</b>: <code>GET /v1/tenant/crm/customers?cursor=xxx&amp;limit=20</code></li>
+      </ul>
+
+      <p><b>レスポンス例</b>:</p>
+      <pre><code>{
+  "customers": [...],
+  "next_cursor": "eyJ1cGRhdGVkX2F0IjoiMjAyNi0wMy0...",
+  "has_more": true,
+  "limit": 20
+}</code></pre>
+
+      <p><code>next_cursor</code> は最後のドキュメントのソートキー値をBase64エンコードした文字列である。<code>has_more</code> が <code>false</code> の場合、次ページは存在しない。</p>
 
       <p><b>顧客詳細レスポンス</b>は、顧客基本情報に加えて<b>タイムライン</b>・<b>タスク</b>・<b>コミュニケーション履歴</b>・<b>AIヒアリング成果物</b>を一括で返却する。これにより、顧客カード画面を1リクエストで描画可能にする。</p>
 
       <h3 id="customer-actions">ドメインアクション</h3>
+
+      <div class="notice notice-low" style="border-left:4px solid #388e3c; background:#e8f5e9; padding:12px; margin:12px 0;"><b>レビュー指摘 L1 対応</b>: フェーズ遷移・担当者変更は既存リソースの状態変更であるため、RESTful 一貫性のために <code>PATCH</code> メソッドを使用する。</div>
+
       <table>
         <thead>
           <tr><th>メソッド</th><th>エンドポイント</th><th>説明</th><th>副作用</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><code>POST</code></td>
+            <td><code>PATCH</code></td>
             <td><code>/v1/tenant/crm/customers/{id}/phase</code></td>
-            <td>フェーズ遷移</td>
+            <td>フェーズ遷移（状態変更）</td>
             <td>タイムラインイベント + 自動タスク生成</td>
           </tr>
           <tr>
@@ -316,6 +342,23 @@ graph LR
       <p><b>カード移動</b>（<code>POST /v1/tenant/crm/kanban/move</code>）は内部的に<b>顧客管理APIのフェーズ遷移</b>（<code>POST /v1/tenant/crm/customers/{id}/phase</code>）と同等の処理を実行する。カンバンUI専用のエンドポイントとして、<code>customer_id</code> と <code>to_phase</code> を直接受け取る簡易インターフェースを提供する。</p>
 
       <!-- ===== Mermaid: リクエストフロー ===== -->
+      <h2 id="rate-limiting">レートリミット</h2>
+
+      <div class="notice notice-low" style="border-left:4px solid #388e3c; background:#e8f5e9; padding:12px; margin:12px 0;"><b>レビュー指摘 L5 対応</b>: CRM API にレートリミットを導入し、過負荷攻撃やバグによる大量リクエストを防止する。</div>
+
+      <table>
+        <thead>
+          <tr><th>対象</th><th>制限</th><th>超過時レスポンス</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>テナント単位（全エンドポイント）</td><td>1000 req/min</td><td><code>429 Too Many Requests</code> + <code>Retry-After</code> ヘッダー</td></tr>
+          <tr><td>従業員単位（変更系操作）</td><td>100 req/min</td><td><code>429 Too Many Requests</code></td></tr>
+          <tr><td>CSV インポート</td><td>1 req/5min（テナント単位）</td><td><code>429 Too Many Requests</code></td></tr>
+        </tbody>
+      </table>
+
+      <p>レートリミットは Cloud Run のミドルウェアレベルで実装し、Redis（Memorystore）でカウンターを管理する。</p>
+
       <h2 id="request-flow">リクエスト処理フロー</h2>
       <p>すべてのCRM APIリクエストは以下の共通フローで処理される:</p>
 
@@ -369,7 +412,54 @@ sequenceDiagram
 }</code></pre>
 
       <h3 id="pagination">ページネーション</h3>
-      <p>一覧系APIは共通のページネーションパラメータ（<code>page</code>, <code>limit</code>）を受け付け、レスポンスには <code>total</code>（総件数）と <code>page</code>（現在ページ）を含む。</p>
+      <p>一覧系APIは<b>cursor-based pagination</b> を採用する（<a href="#customer-list-pagination">顧客一覧のカーソルベースページネーション</a>参照）。共通パラメータとして <code>cursor</code>（カーソル文字列）と <code>limit</code>（取得件数）を受け付け、レスポンスには <code>next_cursor</code>（次ページカーソル）と <code>has_more</code>（次ページ有無）を含む。</p>
+
+      <!-- ===== H2: 監査ログ設計 ===== -->
+      <h2 id="audit-log">監査ログ設計</h2>
+
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;"><b>レビュー指摘 H8 対応</b>: 監査ログの改竄耐性なし。スキーマ定義を Phase 0 で確定する。BigQuery sink は Phase 7 でよいが、ログ構造は先行確定する。</div>
+
+      <p>CRM APIの全変更系操作に対し、<b>監査ログ（Audit Log）</b>を記録する。監査ログは改竄耐性を確保するため、CRMデータとは分離されたコレクション（<code>crm_audit_logs</code>）に書き込み専用で保存する。</p>
+
+      <h3 id="audit-log-schema">監査ログスキーマ</h3>
+      <p>Phase 0 で以下のスキーマを確定し、全変更系エンドポイントで統一的に記録する:</p>
+
+      <pre><code>{
+  "audit_id": "aud_20260318_abc123",      // 監査ログID（自動採番）
+  "tenant_id": "tenant_xxx",               // テナントID
+  "actor": {
+    "employee_id": "emp_001",              // 操作者の従業員ID
+    "employee_role": "manager",            // 操作者のロール
+    "login_role": "company",               // ログイン種別
+    "ip_address": "203.0.113.50",          // リクエスト元IP
+    "user_agent": "Mozilla/5.0 ..."        // User-Agent
+  },
+  "action": "customer.phase_changed",      // 操作種別（リソース.アクション）
+  "resource": {
+    "type": "customer",                    // リソース種別
+    "id": "cust_12345"                     // リソースID
+  },
+  "changes": {
+    "before": { "phase": "responding" },   // 変更前の値
+    "after": { "phase": "hearing" }        // 変更後の値
+  },
+  "metadata": {
+    "request_id": "req_xyz789",            // リクエストトレースID
+    "endpoint": "POST /v1/tenant/crm/customers/{id}/phase",
+    "idempotency_key": null                // 冪等性キー（該当時）
+  },
+  "timestamp": "2026-03-18T10:30:00.000Z", // ISO 8601 タイムスタンプ
+  "log_version": "1.0"                     // スキーマバージョン
+}</code></pre>
+
+      <h3 id="audit-log-policy">監査ログポリシー</h3>
+      <ul>
+        <li><b>書き込み専用</b>: <code>crm_audit_logs</code> コレクションは Append-only とし、更新・削除操作を Firestore Security Rules で禁止する</li>
+        <li><b>保持期間</b>: Firestore 上で最低 90 日間保持。90 日経過後は BigQuery にエクスポートして長期保存する</li>
+        <li><b>BigQuery sink</b>: Phase 7 で Cloud Logging → BigQuery のストリーミングエクスポートを構築。ログ構造は Phase 0 で確定済みのスキーマに準拠する</li>
+        <li><b>改竄検知</b>: 各ログエントリに <code>audit_id</code> + <code>timestamp</code> のハッシュチェーンを適用し、改竄を検知可能にする（Phase 3+ で実装）</li>
+        <li><b>アクセス制限</b>: 監査ログの閲覧は admin ロールのみ許可。manager / sales は閲覧不可</li>
+      </ul>
 
     </main>
 
@@ -380,6 +470,7 @@ sequenceDiagram
           <li><a href="#api-prefix">APIプレフィックスとバージョニング</a></li>
           <li><a href="#customer-api">顧客管理API</a></li>
           <li class="toc-h3"><a href="#customer-crud">CRUD操作</a></li>
+          <li class="toc-h3"><a href="#customer-list-pagination">顧客一覧のカーソルベースページネーション</a></li>
           <li class="toc-h3"><a href="#customer-actions">ドメインアクション</a></li>
           <li><a href="#task-api">タスク管理API</a></li>
           <li><a href="#follow-up-api">追客API</a></li>
@@ -399,6 +490,9 @@ sequenceDiagram
           <li class="toc-h3"><a href="#pii-handling">PII取り扱い</a></li>
           <li class="toc-h3"><a href="#error-format">エラーレスポンス形式</a></li>
           <li class="toc-h3"><a href="#pagination">ページネーション</a></li>
+          <li><a href="#audit-log">監査ログ設計</a></li>
+          <li class="toc-h3"><a href="#audit-log-schema">監査ログスキーマ</a></li>
+          <li class="toc-h3"><a href="#audit-log-policy">監査ログポリシー</a></li>
         </ul>
       </div>
 

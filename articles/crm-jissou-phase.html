@@ -416,6 +416,89 @@ gantt
       </table>
 
       <!-- ============================================ -->
+      <!-- バックアップ・リカバリ戦略 -->
+      <!-- ============================================ -->
+      <h2 id="backup-recovery">バックアップ・リカバリ戦略</h2>
+
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M6 対応</b>: 非機能要件で定義した RPO/RTO を裏付ける具体的なバックアップ戦略を定義する。</div>
+
+      <p>CRMデータの可用性と復旧能力を担保するため、以下の<b>RPO/RTO目標</b>とそれを実現するバックアップ戦略を定義する。</p>
+
+      <h3 id="rpo-rto">RPO/RTO目標</h3>
+      <table>
+        <thead>
+          <tr><th>指標</th><th>目標値</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>RPO（Recovery Point Objective）</b></td>
+            <td><b>1時間以内</b></td>
+            <td>障害発生時に最大1時間分のデータロスを許容する</td>
+          </tr>
+          <tr>
+            <td><b>RTO（Recovery Time Objective）</b></td>
+            <td><b>4時間以内</b></td>
+            <td>障害発生から4時間以内にサービスを復旧する</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="backup-methods">バックアップ方式</h3>
+
+      <h4>1. Firestore PITR（Point-in-Time Recovery）</h4>
+      <p>Firestore のネイティブ機能である <b>PITR</b> を有効化し、過去7日間の任意の時点にデータを復元可能にする。</p>
+      <ul>
+        <li><b>有効化</b>: Firestore データベース設定で PITR を ON にする</li>
+        <li><b>復元粒度</b>: 1分単位（RPO 1時間を十分に満たす）</li>
+        <li><b>保持期間</b>: 過去7日間</li>
+        <li><b>用途</b>: 誤操作やデータ破損からの迅速な復旧</li>
+      </ul>
+
+      <h4>2. 日次エクスポートバックアップ</h4>
+      <p><b>Cloud Scheduler</b> + <b>Cloud Functions</b> による日次バッチで、Firestore の全 CRM コレクションを <b>Cloud Storage</b> にエクスポートする。</p>
+      <ul>
+        <li><b>実行スケジュール</b>: 毎日 02:00 JST</li>
+        <li><b>エクスポート先</b>: <code>gs://{project}-crm-backups/daily/{yyyy-mm-dd}/</code></li>
+        <li><b>対象コレクション</b>: <code>crm_customers</code>, <code>crm_tasks</code>, <code>crm_timeline</code>, <code>crm_communications</code>, <code>crm_inquiries</code>, <code>crm_audit_logs</code></li>
+        <li><b>保持期間</b>: 30日間（ライフサイクルポリシーで自動削除）</li>
+        <li><b>形式</b>: Firestore ネイティブエクスポート形式（<code>gcloud firestore export</code>）</li>
+        <li><b>リストア</b>: <code>gcloud firestore import</code> で復元（RTO 4時間以内で完了可能）</li>
+      </ul>
+
+      <h4>3. テナント単位のデータエクスポート機能</h4>
+      <p>運用・サポート用途として、特定テナントのCRMデータを<b>JSON形式</b>でエクスポートする管理者向け機能を提供する。</p>
+      <ul>
+        <li><b>エンドポイント</b>: <code>POST /v1/admin/crm/tenants/{tenant_id}/export</code>（admin ロール限定）</li>
+        <li><b>出力形式</b>: JSON（顧客・タスク・タイムライン・コミュニケーションを含む）</li>
+        <li><b>用途</b>: テナント解約時のデータ引き渡し、障害調査、テナント単位のリストア</li>
+        <li><b>PII取り扱い</b>: エクスポートデータ内のPIIは暗号化状態のまま出力する（復号キーは別途管理）</li>
+      </ul>
+
+      <h3 id="recovery-procedure">復旧手順サマリー</h3>
+      <table>
+        <thead>
+          <tr><th>障害パターン</th><th>復旧方法</th><th>想定RTO</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>誤操作によるデータ削除（直近7日以内）</td>
+            <td>Firestore PITR による時点復元</td>
+            <td>30分〜1時間</td>
+          </tr>
+          <tr>
+            <td>データ破損（7日以上前）</td>
+            <td>日次エクスポートからの <code>gcloud firestore import</code></td>
+            <td>2〜4時間</td>
+          </tr>
+          <tr>
+            <td>特定テナントのデータ復旧</td>
+            <td>テナント単位エクスポートからの選択的リストア</td>
+            <td>1〜2時間</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================ -->
       <!-- 判断が必要な項目 -->
       <!-- ============================================ -->
       <h2 id="handan">判断が必要な項目</h2>
@@ -574,6 +657,10 @@ graph TD
           <li><a href="#risk">リスクと対策</a></li>
           <li class="toc-h3"><a href="#tech-risk">技術リスク</a></li>
           <li class="toc-h3"><a href="#ops-risk">運用リスク</a></li>
+          <li><a href="#backup-recovery">バックアップ・リカバリ戦略</a></li>
+          <li class="toc-h3"><a href="#rpo-rto">RPO/RTO目標</a></li>
+          <li class="toc-h3"><a href="#backup-methods">バックアップ方式</a></li>
+          <li class="toc-h3"><a href="#recovery-procedure">復旧手順サマリー</a></li>
           <li><a href="#handan">判断が必要な項目</a></li>
           <li class="toc-h3"><a href="#arch-judgment">アーキテクチャ判断</a></li>
           <li class="toc-h3"><a href="#scope-judgment">機能スコープ判断</a></li>

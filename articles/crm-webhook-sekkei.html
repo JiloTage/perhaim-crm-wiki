@@ -403,13 +403,63 @@ def calculate_backoff(attempt: int, base: float = 1.0, max_wait: float = 30.0) -
       <h2 id="security">セキュリティ</h2>
       <p>Webhookエンドポイントは外部からアクセス可能なため、<b>多層防御</b>のセキュリティ設計を採用する。</p>
 
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;"><b>レビュー指摘 H7 対応</b>: Webhook認証が不十分。チャネル別の認証要件を明確化し、dual-secret ローテーション対応を追記。</div>
+
       <h3 id="webhook-secret-verification">Webhook Secret検証</h3>
       <ul>
         <li>各テナント・各Webhookタイプごとに固有の<b>Webhook Secret</b>を発行</li>
         <li>Secretは<b>Secret Manager</b>（Google Cloud Secret Manager）で管理</li>
         <li>定期的なSecret<b>ローテーション</b>（90日ごと推奨）をサポート</li>
-        <li>ローテーション中は<b>新旧2つのSecret</b>を同時に受け付ける移行期間を設ける</li>
+        <li>ローテーション中は<b>新旧2つのSecret</b>を同時に受け付ける移行期間を設ける（<b>dual-secret ローテーション</b>）</li>
       </ul>
+
+      <h3 id="channel-auth-requirements">チャネル別認証要件</h3>
+      <p>各Webhookチャネルの認証方式を以下の通り明確に規定する:</p>
+      <table>
+        <thead>
+          <tr><th>チャネル</th><th>認証方式</th><th>要件</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>LINE</b></td>
+            <td><code>X-Line-Signature</code> 検証</td>
+            <td><b>必須</b>。Channel Secret による HMAC-SHA256 署名を Base64 エンコードで検証する。署名検証なしのリクエストは即時 401 で拒否する。</td>
+          </tr>
+          <tr>
+            <td><b>反響メール（Email）</b></td>
+            <td>per-tenant Bearer token</td>
+            <td><b>必須</b>。テナントごとに発行した Bearer token を <code>Authorization: Bearer {token}</code> ヘッダーで送信する。HMAC-SHA256 署名との併用を推奨する。</td>
+          </tr>
+          <tr>
+            <td><b>ヒアリング完了</b></td>
+            <td>内部 Webhook Secret</td>
+            <td>内部ネットワーク + <code>X-Webhook-Signature</code> の二重検証。</td>
+          </tr>
+          <tr>
+            <td><b>カレンダー</b></td>
+            <td>Google Pub/Sub トークン</td>
+            <td>Google 発行の OAuth トークン検証。audience 値の一致確認必須。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="dual-secret-rotation">dual-secret ローテーション対応</h3>
+      <p>Secret ローテーション時のダウンタイムを排除するため、<b>dual-secret 方式</b>を採用する:</p>
+      <ol>
+        <li>新しい Secret を Secret Manager に登録する（<code>secret_v2</code>）</li>
+        <li>検証ロジックで<b>新旧両方の Secret</b> で署名検証を試行する（いずれか一方が一致すればOK）</li>
+        <li>送信側が新 Secret に切り替わったことを確認後、旧 Secret を無効化する</li>
+        <li>移行期間は最大<b>72時間</b>とし、期限超過時はアラートを発報する</li>
+      </ol>
+      <pre><code># dual-secret 検証の疑似コード
+def verify_webhook_dual_secret(payload: bytes, signature: str, secrets: list[str]) -> bool:
+    for secret in secrets:  # [current_secret, previous_secret]
+        expected = "sha256=" + hmac.new(
+            secret.encode(), payload, hashlib.sha256
+        ).hexdigest()
+        if hmac.compare_digest(expected, signature):
+            return True
+    return False</code></pre>
 
       <h3 id="hmac-signature">HMAC署名</h3>
       <p>すべてのWebhookは<b>HMAC-SHA256署名</b>で正当性を検証する:</p>
@@ -489,6 +539,8 @@ def calculate_backoff(attempt: int, base: float = 1.0, max_wait: float = 30.0) -
           <li class="toc-h3"><a href="#monitoring">監視・アラート</a></li>
           <li><a href="#security">セキュリティ</a></li>
           <li class="toc-h3"><a href="#webhook-secret-verification">Webhook Secret検証</a></li>
+          <li class="toc-h3"><a href="#channel-auth-requirements">チャネル別認証要件</a></li>
+          <li class="toc-h3"><a href="#dual-secret-rotation">dual-secret ローテーション対応</a></li>
           <li class="toc-h3"><a href="#hmac-signature">HMAC署名</a></li>
           <li class="toc-h3"><a href="#ip-whitelist">IPホワイトリスト</a></li>
           <li class="toc-h3"><a href="#rate-limiting">レート制限</a></li>

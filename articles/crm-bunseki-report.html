@@ -334,6 +334,8 @@ graph TB
       <h2 id="shukei-architecture">集計アーキテクチャ</h2>
       <p>分析データの集計方式は、<b>MVP段階</b>のリアルタイム集計から<b>将来拡張</b>のバッチ集計へ段階的に移行する設計とする。データ量が増加しても<a href="crm-api-sekkei.html">API応答時間200ms以内</a>の非機能要件を維持するための戦略である。</p>
 
+      <div class="notice notice-low" style="border-left:4px solid #388e3c; background:#e8f5e9; padding:12px; margin:12px 0;"><b>レビュー指摘 L2 対応</b>: リアルタイム集計（count on read）はデータ量増加で早期にボトルネックとなる。カウンター方式を推奨する: フェーズ遷移時にインクリメンタルにカウンター更新し、<code>crm_analytics/{tenant_id}/counters/{counter_type}</code> でカウンターを管理する。日次/月次の正確な集計はバッチジョブで補正・更新する。</div>
+
       <h3 id="mvp-realtime">MVP段階: リアルタイム集計</h3>
       <p>MVP段階ではテナントあたりの顧客数が少ない（想定: 数百件以下）ため、<b>Firestoreクエリで毎回算出</b>する方式を採用する。</p>
       <ul>

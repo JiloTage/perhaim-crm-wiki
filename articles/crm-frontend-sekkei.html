@@ -283,6 +283,49 @@ graph TD
       </table>
       <p>CRM画面では <code>Layout.tsx</code> を変更せず、<code>CrmLayout</code> コンポーネントが <code>CrmApp.tsx</code> 内でフルワイドモードのレイアウトを提供する。カンバンビューは横スクロール対応とし、カラム数が多い場合もデスクトップで快適に操作できるようにする。</p>
 
+      <h2 id="realtime-sse">リアルタイムデータ同期方式（SSE）</h2>
+
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;"><b>レビュー指摘 H11 対応</b>: Firestore onSnapshot が Cookie 認証と非互換。MVP では SSE（Server-Sent Events）を推奨。Firestore Security Rules 不要で、認証は Cloud Run で完結する。</div>
+
+      <p>CRMフロントエンドにおけるリアルタイムデータ同期には、Firestore の <code>onSnapshot</code> ではなく <b>SSE（Server-Sent Events）</b>を採用する。</p>
+
+      <h3 id="sse-rationale">onSnapshot 非互換の背景</h3>
+      <p>Per Heim CRM は <code>tenant_session_cookie</code> による<b>Cookie ベース認証</b>を採用している。Firestore クライアント SDK の <code>onSnapshot</code> は <b>Firebase Auth トークン</b>を前提としており、Cookie 認証との互換性がない。具体的には:</p>
+      <ul>
+        <li><code>onSnapshot</code> は Firestore Security Rules によるアクセス制御を前提とするが、CRM のテナント分離は <code>CrmRepository</code> のサーバー側ロジックで実装されている</li>
+        <li>Cookie 認証のセッション情報を Firestore Security Rules に渡す標準的な方法が存在しない</li>
+        <li>Firebase Auth を併用すると、認証基盤が二重化され、保守コストとセキュリティリスクが増大する</li>
+      </ul>
+
+      <h3 id="sse-architecture">SSE アーキテクチャ</h3>
+      <p>MVP では Cloud Run 上の SSE エンドポイントを通じてリアルタイム更新をフロントエンドにプッシュする:</p>
+      <ul>
+        <li><b>エンドポイント</b>: <code>GET /v1/tenant/crm/events/stream</code></li>
+        <li><b>認証</b>: 既存の <code>tenant_session_cookie</code> で認証。Cloud Run のミドルウェアで <code>CrmActor</code> を解決し、データスコープに応じたイベントのみを配信する</li>
+        <li><b>イベント種別</b>: <code>customer_updated</code>、<code>task_created</code>、<code>inquiry_received</code>、<code>phase_changed</code></li>
+        <li><b>再接続</b>: <code>EventSource</code> API の自動再接続を活用。<code>Last-Event-ID</code> ヘッダーでイベントの再送を実現する</li>
+        <li><b>Firestore Security Rules</b>: SSE 方式では不要。認証・認可は Cloud Run のサーバー側で完結する</li>
+      </ul>
+
+      <pre><code>// フロントエンド側の SSE 接続例（useCrmEvents.ts）
+const useCrmEvents = (onEvent: (event: CrmEvent) => void) => {
+  useEffect(() => {
+    const source = new EventSource('/v1/tenant/crm/events/stream', {
+      withCredentials: true  // Cookie 認証を送信
+    });
+
+    source.addEventListener('customer_updated', (e) => {
+      onEvent(JSON.parse(e.data));
+    });
+
+    source.addEventListener('phase_changed', (e) => {
+      onEvent(JSON.parse(e.data));
+    });
+
+    return () => source.close();
+  }, [onEvent]);
+};</code></pre>
+
       <h2 id="component-diagram">コンポーネント構成図</h2>
 
       <div class="mermaid-container"><pre class="mermaid">
@@ -330,6 +373,143 @@ graph TD
     useAnalytics -.-> useCrmApi
       </pre></div>
 
+      <h2 id="responsive-design">レスポンシブ設計とモバイル対応</h2>
+
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M10 対応</b>: CRM画面はデスクトップ最適化を主軸とするが、タブレット・モバイルでの最低限の操作性を確保するためレスポンシブ設計の余地を組み込む。</div>
+
+      <h3 id="responsive-breakpoints">ブレークポイント設計</h3>
+      <p><code>CrmLayout</code> にはレスポンシブ対応の余地を確保し、以下の3段階のブレークポイントでレイアウトを切り替える:</p>
+      <table>
+        <thead>
+          <tr><th>デバイス</th><th>幅</th><th>レイアウト変更</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>Desktop</b></td><td>≥1024px</td><td>サイドバー固定220px＋コンテンツエリア。フル機能表示</td></tr>
+          <tr><td><b>Tablet</b></td><td>768px〜1023px</td><td>サイドバーを折りたたみ可能（アイコンのみ表示 60px）。コンテンツエリア拡張</td></tr>
+          <tr><td><b>Mobile</b></td><td>&lt;768px</td><td>サイドバーをハンバーガーメニュー化。コンテンツエリアをフルワイド表示</td></tr>
+        </tbody>
+      </table>
+
+      <pre><code>/* CSS変数によるレスポンシブカラム幅制御 */
+:root {
+  --crm-sidebar-width: 220px;
+  --crm-kanban-column-width: 280px;
+}
+
+@media (max-width: 1023px) {
+  :root {
+    --crm-sidebar-width: 60px;
+    --crm-kanban-column-width: 240px;
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --crm-sidebar-width: 0px;
+    --crm-kanban-column-width: 85vw;
+  }
+}</code></pre>
+
+      <h3 id="kanban-mobile">カンバンビューのモバイル対応</h3>
+      <p>カンバンビューはデスクトップでは横スクロール可能なカラムレイアウトを維持するが、モバイル（&lt;768px）では以下の2モードを切替可能とする:</p>
+      <ul>
+        <li><b>横スクロールモード</b>: 各カラムを <code>85vw</code> 幅でスナップスクロール（<code>scroll-snap-type: x mandatory</code>）。スワイプでフェーズ間を移動</li>
+        <li><b>リスト表示モード</b>: フェーズをアコーディオンヘッダーとし、縦方向に全カードを展開表示。<code>KanbanBoard</code> コンポーネントの <code>viewMode</code> prop で切替</li>
+      </ul>
+      <p>デフォルトはリスト表示モードとし、ユーザーが任意にトグルできるUIを <code>KanbanBoard</code> のヘッダーに配置する。</p>
+
+      <h3 id="touch-interaction">タッチ操作対応</h3>
+      <p>タッチデバイスではドラッグ&amp;ドロップの操作性が低下するため、以下の対応を行う:</p>
+      <ul>
+        <li><b>長押しで D&amp;D 発動</b>: タッチデバイスでは <code>300ms</code> の長押しでドラッグモードを開始。誤操作防止のため、通常タップとの区別を明確にする</li>
+        <li><b>触覚フィードバック</b>: <code>navigator.vibrate(50)</code> でドラッグ開始時に振動フィードバックを提供（対応デバイスのみ）</li>
+        <li><b>代替操作</b>: モバイルではカード上のコンテキストメニュー（「…」ボタン）からフェーズ遷移を選択する方式も提供。D&amp;D に不慣れなユーザーへのフォールバック</li>
+      </ul>
+
+      <h2 id="animation-policy">アニメーション方針</h2>
+
+      <div class="notice notice-low" style="border-left:4px solid #388e3c; background:#e8f5e9; padding:12px; margin:12px 0;"><b>レビュー指摘 L6 対応</b>: CRM画面のアニメーション方針を定義する。カンバン D&amp;D: <code>@dnd-kit</code> の内蔵アニメーション（CSS transitions）を使用。ページ遷移: React Router の route transitions（CSS-based）。通知トースト: CSS keyframes アニメーション。<code>framer-motion</code> はバンドルサイズの観点から MVP では不採用とし、Phase 4+ で必要に応じて検討する。<code>prefers-reduced-motion</code> メディアクエリを尊重すること。</div>
+
+      <h2 id="shared-module-boundary">共有モジュール境界の定義</h2>
+
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M11 対応</b>: design-system / hooks / auth の共有境界が未定義であったため、CRM固有モジュールと共有モジュールの責務境界を明確化する。</div>
+
+      <h3 id="shared-directory">共有ディレクトリ構成</h3>
+      <p>共有コンポーネントは <code>frontend/src/shared/</code> ディレクトリに集約し、CRM固有のコードは <code>frontend/src/crm/</code> に閉じる:</p>
+
+      <pre><code>frontend/src/
+├── shared/                       # ★共有モジュール
+│   ├── design-system/
+│   │   ├── Button.tsx            # 汎用ボタン
+│   │   ├── Input.tsx             # 汎用入力フィールド
+│   │   ├── Modal.tsx             # 汎用モーダル
+│   │   ├── Select.tsx            # 汎用セレクト
+│   │   ├── Toast.tsx             # 通知トースト
+│   │   └── tokens.css            # デザイントークン（既存を移動）
+│   ├── hooks/
+│   │   ├── useAuth.ts            # 認証状態管理
+│   │   ├── useTenant.ts          # テナント情報取得
+│   │   └── useFetch.ts           # 汎用 fetch ラッパー
+│   └── auth/
+│       ├── RequireTenantAuth.tsx  # テナント認証ガード（既存を移動）
+│       └── AuthContext.tsx        # 認証コンテキスト
+│
+├── crm/                          # CRM固有（shared からの import のみ許可）
+│   ├── components/               # CRM専用コンポーネント
+│   ├── hooks/                    # CRM専用hooks（useCrmApi等）
+│   ├── pages/                    # CRM画面
+│   └── types.ts                  # CRM型定義
+│
+└── pages/                        # 既存ページ（変更しない）
+    ├── SalesConsole.tsx
+    └── CompanyConsole.tsx</code></pre>
+
+      <h3 id="shared-targets">共有対象の分類</h3>
+      <table>
+        <thead>
+          <tr><th>カテゴリ</th><th>共有対象</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>design-system</b></td><td>Button, Input, Modal, Select, Toast, tokens.css</td><td>全画面で統一的に使用するUIプリミティブ。視覚的一貫性を担保</td></tr>
+          <tr><td><b>hooks</b></td><td>useAuth, useTenant, useFetch</td><td>認証・テナント・通信の横断的関心事を共有</td></tr>
+          <tr><td><b>auth</b></td><td>RequireTenantAuth, AuthContext</td><td>テナント認証の共通ガードとコンテキスト。CRM・既存画面の双方で使用</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="dependency-direction">依存関係の方向ルール</h3>
+      <p>モジュール間の import 方向を以下のルールで厳密に制御する。違反は <code>eslint-plugin-import</code> の <code>no-restricted-paths</code> ルールで CI で検出する:</p>
+      <ul>
+        <li><b>shared → crm</b>: <span style="color:#388e3c;">OK</span> — CRM は共有モジュールを自由に利用可能</li>
+        <li><b>shared → pages</b>: <span style="color:#388e3c;">OK</span> — 既存ページも共有モジュールを利用可能</li>
+        <li><b>crm → pages</b>: <span style="color:#d32f2f;">NG</span> — CRM から既存ページへの import を禁止。既存画面との結合を防止</li>
+        <li><b>pages → crm</b>: <span style="color:#d32f2f;">NG</span> — 既存ページから CRM への import を禁止。逆方向の依存を排除</li>
+        <li><b>crm → shared</b>: <span style="color:#388e3c;">OK</span>（上記 shared → crm と同義）</li>
+        <li><b>pages → shared</b>: <span style="color:#388e3c;">OK</span>（上記 shared → pages と同義）</li>
+      </ul>
+
+      <pre><code>// .eslintrc.js — import 方向の強制
+{
+  rules: {
+    'import/no-restricted-paths': ['error', {
+      zones: [
+        // crm → pages 禁止
+        { target: './src/crm/', from: './src/pages/', message: 'CRM から既存 pages への import は禁止です' },
+        // pages → crm 禁止
+        { target: './src/pages/', from: './src/crm/', message: '既存 pages から CRM への import は禁止です' },
+      ]
+    }]
+  }
+}</code></pre>
+
+      <h3 id="shared-versioning">共有モジュールのバージョニング方針</h3>
+      <p>Per Heim プロジェクトは monorepo 構成のため、共有モジュールのバージョニングには以下の方針を採用する:</p>
+      <ul>
+        <li><b>monorepo 内 workspace 方式</b>: <code>shared/</code> を内部 workspace パッケージ（<code>@perhaim/shared</code>）として定義し、<code>package.json</code> の <code>workspaces</code> で管理</li>
+        <li><b>セマンティックバージョニング</b>: 共有モジュールの破壊的変更時は major バージョンを上げる。CRM・既存ページそれぞれが依存バージョンを明示</li>
+        <li><b>MVP 段階</b>: monorepo 内の直接参照（相対パス import）で開始し、共有モジュールの安定後に workspace パッケージ化を検討する</li>
+        <li><b>変更影響の可視化</b>: 共有モジュールの変更時は、<code>crm/</code> と <code>pages/</code> の両方でテストを実行し、影響範囲を確認する CI ジョブを設定</li>
+      </ul>
+
     </main>
 
     <aside class="wiki-sidebar">
@@ -354,7 +534,19 @@ graph TD
           <li><a href="#css-design">CSS設計</a></li>
           <li class="toc-h3"><a href="#css-variables">CRM専用CSS変数</a></li>
           <li class="toc-h3"><a href="#layout-policy">モバイル vs デスクトップレイアウト方針</a></li>
+          <li><a href="#realtime-sse">リアルタイムデータ同期方式（SSE）</a></li>
+          <li class="toc-h3"><a href="#sse-rationale">onSnapshot 非互換の背景</a></li>
+          <li class="toc-h3"><a href="#sse-architecture">SSE アーキテクチャ</a></li>
           <li><a href="#component-diagram">コンポーネント構成図</a></li>
+          <li><a href="#responsive-design">レスポンシブ設計とモバイル対応</a></li>
+          <li class="toc-h3"><a href="#responsive-breakpoints">ブレークポイント設計</a></li>
+          <li class="toc-h3"><a href="#kanban-mobile">カンバンビューのモバイル対応</a></li>
+          <li class="toc-h3"><a href="#touch-interaction">タッチ操作対応</a></li>
+          <li><a href="#shared-module-boundary">共有モジュール境界の定義</a></li>
+          <li class="toc-h3"><a href="#shared-directory">共有ディレクトリ構成</a></li>
+          <li class="toc-h3"><a href="#shared-targets">共有対象の分類</a></li>
+          <li class="toc-h3"><a href="#dependency-direction">依存関係の方向ルール</a></li>
+          <li class="toc-h3"><a href="#shared-versioning">共有モジュールのバージョニング方針</a></li>
         </ul>
       </div>
 

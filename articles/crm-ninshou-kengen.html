@@ -49,7 +49,7 @@
         <li><code>tenant_session_cookie</code> は引き続き <code>company | store</code> のログイン境界として使用する（既存機能に変更なし）</li>
         <li>CRMの業務権限は <code>tenant_employees.role</code> の値（<code>admin | manager | sales</code>）で判定する</li>
         <li>実際のデータアクセス範囲は <code>login_role</code> と <code>employee.role</code> の<b>組み合わせ</b>で決定する</li>
-        <li>CRM APIはすべて <code>X-Tenant-Employee-Id</code> ヘッダーを要求し、該当employeeがセッションに対して正当かを検証する</li>
+        <li><b>セッション埋め込み方式</b>: ログイン時に <code>employee_id</code> + <code>employee_role</code> をセッショントークンに含め、サーバー側でセッションから取得する（<code>X-Tenant-Employee-Id</code> ヘッダーは廃止）</li>
       </ul>
 
       <div class="mermaid-container"><pre class="mermaid">
@@ -148,41 +148,91 @@ graph TB
         </tbody>
       </table>
 
-      <p><b>スコープ判定ロジック</b>（<code>repository.py</code> 内で適用）:</p>
+      <h3 id="crm-repository">CrmRepository — テナント分離多層防御</h3>
 
-      <pre><code># データスコープのクエリフィルタ適用
-def apply_scope_filter(query, actor: CrmActor):
-    scope = PERMISSION_MATRIX[actor.employee_role]["data_scope"]
+      <div class="notice notice-critical" style="border-left:4px solid #d32f2f; background:#fff3f3; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 C4 + H4 対応</b>: 従来は「全クエリに tenant_id フィルタ必須」という方針のみで強制メカニズムがなかった。<code>CrmRepository</code> の <code>_base_query()</code> により tenant_id を自動適用し、書き忘れを構造的に不可能にする。
+      </div>
 
-    if scope == "all_stores":
-        # admin: tenant_id のみでフィルタ（全店舗アクセス可）
-        return query.where("tenant_id", "==", actor.tenant_id)
+      <p>全CRMクエリは <code>CrmRepository</code> の <code>_base_query()</code> 経由のみとし、生コレクション参照を禁止する。<code>_scoped_query()</code> はロールベースのデータスコープフィルタを追加で適用する。</p>
 
-    elif scope == "company_or_own_store":
-        # manager: login_role に応じて分岐
-        if actor.login_role == "company":
-            return query.where("tenant_id", "==", actor.tenant_id)
-        else:  # store login
-            return query.where("tenant_id", "==", actor.tenant_id) \
-                        .where("store_id", "==", actor.store_id)
+      <pre><code class="language-python"># src/server/crm/repository.py — Phase 0 で実装
+class CrmRepository:
+    """テナント分離を構造的に強制するCRMリポジトリ基盤。
+    全CRMクエリはこのクラス経由でのみ実行する。
+    """
+    def __init__(self, actor: CrmActor):
+        self._actor = actor
+        self._tenant_id = actor.tenant_id
 
-    elif scope == "assigned_only":
-        # sales: 自分の担当のみ
-        base = query.where("tenant_id", "==", actor.tenant_id)
-        if actor.login_role == "store":
-            base = base.where("store_id", "==", actor.store_id)
-        return base.where("assigned_employee_id", "==", actor.employee_id)</code></pre>
+    def _base_query(self, collection: str):
+        """全クエリに tenant_id を自動適用（書き忘れ不可能）"""
+        return get_db().collection(collection).where(
+            "tenant_id", "==", self._tenant_id
+        )
+
+    def _scoped_query(self, collection: str):
+        """data_scope を加味したクエリ（ロールベースフィルタ）"""
+        q = self._base_query(collection)
+        return self._actor.apply_scope(q)
+
+    def list_customers(self, phase: str = None, ...):
+        q = self._scoped_query("crm_customers")
+        if phase:
+            q = q.where("phase", "==", phase)
+        return q.order_by("updated_at", direction="DESCENDING").stream()
+
+    def get_customer(self, customer_id: str):
+        doc = self._base_query("crm_customers").where(
+            "__name__", "==", customer_id
+        ).get()
+        if not doc:
+            raise NotFoundError(f"Customer {customer_id} not found")
+        return doc[0].to_dict()</code></pre>
+
+      <p><b>禁止事項</b>: CRMコード内で <code>get_db().collection()</code> を直接呼び出すことは禁止。lint / code review で排除する。</p>
+
+      <p><b>スコープ判定ロジック</b>（<code>CrmActor.apply_scope()</code> 内で適用）:</p>
+
+      <pre><code class="language-python"># CrmActor のスコープ適用メソッド
+class CrmActor:
+    # ...
+    def apply_scope(self, query):
+        """ロールに応じたデータスコープフィルタを適用"""
+        scope = PERMISSION_MATRIX[self.employee_role]["data_scope"]
+
+        if scope == "all_stores":
+            # admin: tenant_id のみ（_base_query で適用済み）
+            return query
+
+        elif scope == "company_or_own_store":
+            # manager: login_role に応じて分岐
+            if self.login_role == "company":
+                return query
+            else:  # store login
+                return query.where("store_id", "==", self.store_id)
+
+        elif scope == "assigned_only":
+            # sales: 自分の担当のみ
+            base = query
+            if self.login_role == "store":
+                base = base.where("store_id", "==", self.store_id)
+            return base.where("assigned_employee_id", "==", self.employee_id)</code></pre>
 
       <h2 id="crm-actor-flow">CrmActor解決フロー</h2>
 
-      <p>CRM APIは<b>Cookie単独では操作者を確定しない</b>。<code>tenant_session_cookie</code>（ログイン境界: company/store）と <code>X-Tenant-Employee-Id</code>（操作者識別）の2つを組み合わせて、<code>CrmActor</code> オブジェクトを構築する。</p>
+      <div class="notice notice-critical" style="border-left:4px solid #d32f2f; background:#fff3f3; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 C3 対応</b>: <code>X-Tenant-Employee-Id</code> ヘッダーは廃止。セッショントークンに <code>employee_id</code> + <code>employee_role</code> を埋め込み、サーバー側でセッションから取得する方式に変更。
+      </div>
+
+      <p>CRM APIは <code>tenant_session_cookie</code> に埋め込まれた <code>employee_id</code> と <code>employee_role</code> からCrmActorを構築する。<b>ヘッダーによる操作者指定は廃止</b>され、なりすましリスクを排除する。</p>
 
       <h3 id="resolve-process">resolve_tenant_actor() の処理手順</h3>
 
       <ol>
-        <li><b>Cookie検証</b>: <code>request.cookies</code> から <code>tenant_session_cookie</code> を取得し、<code>_require_tenant_session(token)</code> で検証する。成功すると <code>tenant_id</code>、<code>store_id</code>、<code>login_role</code> が返る。</li>
-        <li><b>Employee検証</b>: <code>X-Tenant-Employee-Id</code> ヘッダーの値を使い、<code>_require_operator_employee(tenant_id, employee_id, store_id)</code> で従業員レコードを取得・検証する。該当する従業員が存在しない、または店舗の所属が不一致であれば 403 エラーを返す。</li>
-        <li><b>CrmActor構築</b>: 検証済みの情報をもとに <code>CrmActor</code> を生成する。<code>employee_role</code> は従業員レコードの <code>role</code> フィールドから取得し、未設定の場合はデフォルトで <code>sales</code> を適用する。</li>
+        <li><b>セッション検証</b>: <code>request.cookies</code> から <code>tenant_session_cookie</code> を取得し検証する。成功すると <code>tenant_id</code>、<code>store_id</code>、<code>login_role</code>、<code>employee_id</code>、<code>employee_role</code> が返る。</li>
+        <li><b>Employee有効性確認</b>: セッションに含まれる <code>employee_id</code> が現在も有効（<code>active: true</code>）であることをFirestoreで確認する。退職・無効化された従業員のアクセスを即座に遮断する。</li>
+        <li><b>CrmActor構築</b>: 検証済みの情報をもとに <code>CrmActor</code> を生成する。<code>employee_role</code> はセッションから取得し、未設定の場合はデフォルトで <code>sales</code> を適用する。</li>
         <li><b>ログイン種別チェック</b>: <code>PERMISSION_MATRIX[employee_role]["allowed_login_roles"]</code> に <code>login_role</code> が含まれているかを検証する。例えば <code>admin</code> ロールは <code>company</code> ログインのみ許可されるため、<code>store</code> ログインからは 403 エラーとなる。</li>
         <li><b>権限判定</b>: 各エンドポイントで <code>CrmActor.employee_role</code> と <code>PERMISSION_MATRIX</code> を照合し、操作可否を判定する。</li>
       </ol>
@@ -192,36 +242,32 @@ def apply_scope_filter(query, actor: CrmActor):
 class CrmActor:
     tenant_id: str       # テナント識別子
     store_id: str        # 店舗識別子（store ログイン時に確定）
-    login_role: str      # "company" | "store"（Cookie由来）
-    employee_id: str     # 操作者の従業員ID（ヘッダー由来）
-    employee_role: str   # "admin" | "manager" | "sales"（従業員レコード由来）</code></pre>
+    login_role: str      # "company" | "store"（セッション由来）
+    employee_id: str     # 操作者の従業員ID（セッション埋め込み）
+    employee_role: str   # "admin" | "manager" | "sales"（セッション埋め込み）</code></pre>
 
       <div class="mermaid-container"><pre class="mermaid">
 sequenceDiagram
     participant Client as CRM Frontend
     participant API as crm_api.py
     participant Resolver as resolve_tenant_actor()
-    participant InviteSales as invite_sales.repository
+    participant Session as セッションストア
     participant Firestore as Firestore
 
-    Client->>API: GET /tenant/crm/customers<br/>Cookie: tenant_session<br/>X-Tenant-Employee-Id: emp_xxx
+    Client->>API: GET /tenant/crm/customers<br/>Cookie: tenant_session<br/>(employee_id 埋め込み済み)
 
-    API->>Resolver: resolve_tenant_actor(request, emp_xxx)
+    API->>Resolver: resolve_tenant_actor(request)
 
-    Note over Resolver: Step 1: Cookie検証
-    Resolver->>InviteSales: _require_tenant_session(cookie)
-    InviteSales->>Firestore: セッション検証
-    Firestore-->>InviteSales: tenant_id, store_id, login_role
-    InviteSales-->>Resolver: セッション情報
+    Note over Resolver: Step 1: セッション検証 + employee_id 取得
+    Resolver->>Session: セッション検証
+    Session-->>Resolver: tenant_id, store_id, login_role,<br/>employee_id, employee_role
 
-    Note over Resolver: Step 2: Employee検証
-    Resolver->>InviteSales: _require_operator_employee(tenant_id, emp_xxx, store_id)
-    InviteSales->>Firestore: 従業員レコード取得
-    Firestore-->>InviteSales: employee record (role: manager)
-    InviteSales-->>Resolver: employee情報
+    Note over Resolver: Step 2: Employee有効性確認
+    Resolver->>Firestore: 従業員レコード取得 (active: true?)
+    Firestore-->>Resolver: employee record (active: true)
 
     Note over Resolver: Step 3: CrmActor構築
-    Resolver-->>API: CrmActor(tenant_id, store_id,<br/>login_role, emp_xxx, role=manager)
+    Resolver-->>API: CrmActor(tenant_id, store_id,<br/>login_role, employee_id, role=manager)
 
     Note over API: Step 4: ログイン種別チェック
     API->>API: allowed_login_roles に login_role が含まれるか確認
@@ -237,21 +283,22 @@ sequenceDiagram
 
       <p>CRM機能の認証は既存の <code>tenant_session_cookie</code> をそのまま利用する。<b>新たなログイン画面や認証フローは追加しない</b>。ユーザーは既存の CompanyConsole または SalesConsole からログインし、CRM画面（<code>/crm</code> パス）にナビゲーションで遷移する。フロントエンドのルーティングでは <code>RequireTenantAuth</code> ガードの内側にCRMルートを配置し、未認証ユーザーのアクセスを防止する。</p>
 
-      <h3 id="crm-api-ninshou">CRM APIでのX-Tenant-Employee-Id必須化</h3>
+      <h3 id="crm-api-ninshou">CRM APIでのセッション埋め込み認証</h3>
 
-      <p>既存の <code>invite_sales</code> APIは <code>tenant_session_cookie</code> のみで操作者を特定できるが、CRM APIでは<b>操作者の粒度が従業員レベル</b>に細分化されるため、<code>X-Tenant-Employee-Id</code> ヘッダーを全エンドポイントで必須とする。</p>
+      <div class="notice notice-critical" style="border-left:4px solid #d32f2f; background:#fff3f3; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 C3 対応</b>: <code>X-Tenant-Employee-Id</code> ヘッダーは廃止。セッショントークンから employee_id を取得する。
+      </div>
 
-      <pre><code># crm_api.py - エンドポイント例
+      <p>CRM APIでは<b>操作者の粒度が従業員レベル</b>に細分化される。ログイン時にセッショントークンに <code>employee_id</code> + <code>employee_role</code> を埋め込み、サーバー側ではセッションからこれらの値を取得する。CRM では「<b>1ログイン = 1従業員</b>」モデルを採用する。</p>
+
+      <pre><code># crm_api.py - エンドポイント例（セッション埋め込み方式）
 @router.get("/tenant/crm/customers")
-def list_customers(
-    request: Request,
-    operator_employee_id: str = Depends(_header_operator_employee_id),
-):
-    actor = resolve_tenant_actor(request, operator_employee_id)
-    crm_repo = get_crm_repo()
-    return crm_repo.list_customers(actor=actor, ...)</code></pre>
+def list_customers(request: Request):
+    actor = resolve_tenant_actor(request)  # セッションから employee_id を取得
+    crm_repo = CrmRepository(actor)        # テナント分離付きリポジトリ
+    return crm_repo.list_customers(...)</code></pre>
 
-      <p>フロントエンドの <code>useCrmApi</code> フックは、ログイン後にローカルストレージまたはコンテキストから <code>employee_id</code> を取得し、すべてのCRM APIリクエストに <code>X-Tenant-Employee-Id</code> ヘッダーを自動付与する。</p>
+      <p>フロントエンドの <code>useCrmApi</code> フックは、Cookie ベースの認証を自動的に使用する。employee_id はセッショントークンに含まれているため、フロントエンド側での明示的なヘッダー付与は不要。</p>
 
       <h3 id="security-kouryo">セキュリティ考慮事項</h3>
 
@@ -261,9 +308,14 @@ def list_customers(
         </thead>
         <tbody>
           <tr>
-            <td>他人の employee_id を詐称</td>
-            <td><code>_require_operator_employee()</code> で Cookie セッションの <code>tenant_id</code>・<code>store_id</code> と従業員レコードの所属を照合</td>
+            <td>他人の employee_id を詐称（なりすまし）</td>
+            <td><b>セッション埋め込み方式</b>: employee_id はサーバー側でセッショントークンから取得。クライアントからの指定は不可能（C3 対応）</td>
             <td><code>resolve_tenant_actor()</code></td>
+          </tr>
+          <tr>
+            <td>テナント分離の書き忘れ</td>
+            <td><b>CrmRepository._base_query()</b> で全クエリに tenant_id を自動適用。生コレクション参照を禁止（C4 対応）</td>
+            <td><code>CrmRepository</code></td>
           </tr>
           <tr>
             <td>store ログインで admin 権限を取得</td>
@@ -288,11 +340,55 @@ def list_customers(
         </tbody>
       </table>
 
+      <div class="notice notice-low" style="border-left:4px solid #388e3c; background:#e8f5e9; padding:12px; margin:12px 0;"><b>レビュー指摘 L3 対応</b>: <code>SameSite=Lax</code> は GET リクエストの CSRF 保護が不十分（Top-level navigation で Cookie が送信される）。変更系 API（POST/PATCH/DELETE）で CSRF トークン検証を追加する。フロントエンドの <code>useCrmApi</code> hook で <code>X-CSRF-Token</code> ヘッダーを自動付与し、サーバー側で検証する。将来的に <code>SameSite=Strict</code> への移行を検討する。</div>
+
       <p><b>Phase 0 実装における重要な設計判断</b>:</p>
       <ul>
         <li><code>invite_sales</code> 側に公開ヘルパー <code>resolve_tenant_actor()</code> を追加し、private メソッド（<code>_require_tenant_session</code>、<code>_require_operator_employee</code>）の直接呼び出しを避ける</li>
         <li><code>assigned_only</code> スコープの判定は <code>employee_id</code> ベースで行い、Cookie 単独では許可しない</li>
         <li>将来的に RBAC からABAC（属性ベースアクセス制御）への拡張パスを確保するため、<code>CrmActor</code> に属性を追加しやすいデータクラス設計とする</li>
+      </ul>
+
+      <h2 id="heiko-unyo-rbac">並行運用時のRBACバイパス防止</h2>
+
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;"><b>レビュー指摘 H10 対応</b>: SalesConsole/CRM 並行運用で RBAC バイパス可能。CRM 有効テナントでは sales ロールの /sales アクセスを制限し、feature flag で制御する。</div>
+
+      <p>CRM導入後も既存の <b>SalesConsole</b>（<code>/sales</code>）は一定期間並行運用される。この間、CRM側で定義した RBAC（admin/manager/sales）による権限制御が、SalesConsole 経由でバイパスされるリスクがある。具体的には、CRM側で <code>sales</code> ロールに制限している操作（例: 反響の ignore、顧客 merge）が、SalesConsole の既存APIから実行可能になるケースを防止する必要がある。</p>
+
+      <h3 id="feature-flag-seigyo">feature flag による制御</h3>
+
+      <p>テナント設定に <code>crm_enabled</code> feature flag を導入し、CRM有効テナントでは以下の制御を適用する:</p>
+
+      <table>
+        <thead>
+          <tr><th>条件</th><th><code>crm_enabled = true</code></th><th><code>crm_enabled = false</code></th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>sales</code> ロールの <code>/sales</code> アクセス</td>
+            <td><b>読み取り専用に制限</b>。変更系操作はCRM画面（<code>/crm</code>）経由のみ許可する</td>
+            <td>従来通り全操作可能</td>
+          </tr>
+          <tr>
+            <td><code>manager</code> / <code>admin</code> の <code>/sales</code> アクセス</td>
+            <td>従来通り（管理目的のアクセスを許可）</td>
+            <td>従来通り</td>
+          </tr>
+          <tr>
+            <td>CRM API（<code>/v1/tenant/crm/*</code>）</td>
+            <td>RBAC に従いアクセス制御</td>
+            <td>404 Not Found を返却</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="rbac-bypass-taisaku">バイパス防止の実装方針</h3>
+
+      <ul>
+        <li><b>ミドルウェアレベル</b>: <code>crm_enabled</code> フラグが有効なテナントでは、<code>/sales</code> 配下の変更系エンドポイント（POST/PATCH/DELETE）に対し、<code>sales</code> ロールからのアクセスを <code>403 Forbidden</code> で拒否する</li>
+        <li><b>フロントエンド</b>: <code>crm_enabled</code> テナントの SalesConsole 画面では、変更系ボタン（編集・削除等）を非表示にし、CRM画面への誘導バナーを表示する</li>
+        <li><b>段階的移行</b>: テナントごとに <code>crm_enabled</code> を切り替えることで、段階的にCRMへ移行する。全テナント移行完了後、SalesConsole を廃止する</li>
+        <li><b>監査ログ</b>: <code>crm_enabled</code> テナントで <code>/sales</code> への変更系リクエストが拒否された場合、監査ログに記録してバイパス試行を追跡する</li>
       </ul>
 
     </main>
@@ -308,8 +404,12 @@ def list_customers(
           <li class="toc-h3"><a href="#resolve-process">resolve_tenant_actor() の処理手順</a></li>
           <li><a href="#ninshou-flow">認証フロー詳細</a></li>
           <li class="toc-h3"><a href="#cookie-ninshou">既存Cookie認証の継続利用</a></li>
-          <li class="toc-h3"><a href="#crm-api-ninshou">CRM APIでのX-Tenant-Employee-Id必須化</a></li>
+          <li class="toc-h3"><a href="#crm-repository">CrmRepository — テナント分離多層防御</a></li>
+          <li class="toc-h3"><a href="#crm-api-ninshou">CRM APIでのセッション埋め込み認証</a></li>
           <li class="toc-h3"><a href="#security-kouryo">セキュリティ考慮事項</a></li>
+          <li><a href="#heiko-unyo-rbac">並行運用時のRBACバイパス防止</a></li>
+          <li class="toc-h3"><a href="#feature-flag-seigyo">feature flag による制御</a></li>
+          <li class="toc-h3"><a href="#rbac-bypass-taisaku">バイパス防止の実装方針</a></li>
         </ul>
       </div>
 

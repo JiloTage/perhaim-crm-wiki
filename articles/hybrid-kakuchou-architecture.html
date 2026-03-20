@@ -107,27 +107,130 @@ graph TB
 
       <p>CRMモジュールが既存の <code>invite_sales</code> と接続する方法は、<b>読み取り専用参照</b>、<b>イベントフック</b>、<b>認証共有</b>の3つに限定される。この制約により、既存機能の安定性を保証する。</p>
 
-      <h3 id="readonly-ref">読み取り専用参照</h3>
+      <h3 id="readonly-ref">読み取り専用参照（公開APIパターン）</h3>
 
-      <p>CRMの <code>repository.py</code> から既存の <code>get_invite_sales_repo()</code> を参照し、以下のデータを<b>読み取り専用</b>で取得する:</p>
+      <div class="notice notice-critical" style="border-left:4px solid #d32f2f; background:#fff3f3; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 C1 対応</b>: 従来の「読み取り専用参照」は具体策が不足しており、threading lock競合・不整合データ読み取り・1MBドキュメント全取得のリスクがあった。以下の公開APIパターンで解決する。
+      </div>
+
+      <p>CRMバックエンドから既存 <code>invite_sales</code> のデータにアクセスする際は、<b><code>invite_sales/public_api.py</code></b> の公開メソッド経由のみとする。<code>_db</code> への直接参照は禁止し、lock内でのdeepcopyにより安全なスナップショットを返す。</p>
+
+      <h4 id="public-api-design">公開APIの設計</h4>
+
+      <pre><code class="language-python"># invite_sales/public_api.py — Phase 0 で実装
+"""invite_sales の公開インターフェース。
+CRM バックエンドはこのモジュール経由でのみ invite_sales データにアクセスする。
+"""
+import copy
+from typing import Optional
+
+class InviteSalesPublicAPI:
+    def __init__(self, repo):
+        self._repo = repo  # InviteSalesRepository
+
+    def get_lead_snapshot(self, tenant_id: str, lead_id: str) -> Optional[dict]:
+        """lock 内で deepcopy した lead のスナップショットを返す。
+        CRM 側で安全に読み取り可能（threading lock 競合なし）。
+        """
+        with self._repo._lock:
+            lead = self._repo._db.get("leads", {}).get(lead_id)
+            return copy.deepcopy(lead) if lead else None
+
+    def get_artifacts_snapshot(self, tenant_id: str, lead_id: str) -> Optional[dict]:
+        """AI ヒアリング成果物（hearing_profile, needs_tags）のスナップショット。"""
+        with self._repo._lock:
+            artifacts = self._repo._db.get("artifacts", {}).get(lead_id)
+            return copy.deepcopy(artifacts) if artifacts else None
+
+    def get_session_status(self, tenant_id: str, lead_id: str) -> Optional[str]:
+        """ヒアリングセッションの現在状態を返す。"""
+        with self._repo._lock:
+            sessions = self._repo._db.get("sessions", {})
+            for session in sessions.values():
+                if session.get("lead_id") == lead_id:
+                    return session.get("status")
+            return None</code></pre>
+
+      <h4 id="access-rules">アクセスルール</h4>
 
       <table>
         <thead>
           <tr><th>既存データ</th><th>CRM側の用途</th><th>アクセス方法</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>leads</code></td><td>顧客レコードへの紐づけ</td><td>lead_id → customer.lead_ids</td></tr>
-          <tr><td><code>artifacts</code></td><td>AIプロファイル表示</td><td>hearing_profile への転記</td></tr>
-          <tr><td><code>sessions</code></td><td>ヒアリング状態の照会</td><td>hearing_status の確認</td></tr>
-          <tr><td><code>tenant_accounts</code></td><td>テナント情報の共有</td><td>既存認証基盤経由</td></tr>
-          <tr><td><code>store_registry</code></td><td>店舗情報の共有</td><td>既存認証基盤経由</td></tr>
+          <tr><td><code>leads</code></td><td>顧客レコードへの紐づけ</td><td><code>public_api.get_lead_snapshot()</code></td></tr>
+          <tr><td><code>artifacts</code></td><td>AIプロファイル表示</td><td><code>public_api.get_artifacts_snapshot()</code></td></tr>
+          <tr><td><code>sessions</code></td><td>ヒアリング状態の照会</td><td><code>public_api.get_session_status()</code></td></tr>
+          <tr><td><code>tenant_accounts</code></td><td>テナント情報の共有</td><td>既存認証基盤経由（Firestore直接参照OK）</td></tr>
+          <tr><td><code>store_registry</code></td><td>店舗情報の共有</td><td>既存認証基盤経由（Firestore直接参照OK）</td></tr>
           <tr><td><code>tenant_employees</code></td><td>従業員・担当者情報</td><td>既存認証基盤経由 + role拡張</td></tr>
         </tbody>
       </table>
 
-      <h3 id="event-hook">イベントフック</h3>
+      <p><b>禁止事項</b>: CRMコード内で <code>invite_sales._db</code> や <code>get_invite_sales_repo()._db</code> を直接参照することは禁止。lint / code review で排除する。フロントエンドは <code>crm_customers</code> コレクションの onSnapshot を使い、<code>invite_sales_state/default</code> は直接 watch しない。</p>
 
-      <p>既存の <code>complete_session()</code> 内部に<b>イベントフック</b>を追加し、AIヒアリング完了時にCRM側の <code>on_hearing_complete()</code> を呼び出す。これにより以下の自動処理が実行される:</p>
+      <h3 id="event-hook">イベントフック（Cloud Tasks非同期方式）</h3>
+
+      <div class="notice notice-critical" style="border-left:4px solid #d32f2f; background:#fff3f3; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 C2 対応</b>: 従来設計の同期的 <code>on_hearing_complete()</code> 呼び出しは、lock内CRM書き込みでdeadlockリスクがあり、失敗時リトライも未定義だった。Cloud Tasks による非同期フック方式に変更する。
+      </div>
+
+      <p>既存の <code>complete_session()</code> のlock<b>外側</b>で、<b>Cloud Tasks</b> に非同期タスクをenqueueする。CRM側は内部エンドポイントでイベントを受信し、独立したトランザクションで処理する。</p>
+
+      <h4 id="event-hook-flow">非同期フックフロー</h4>
+
+      <div class="mermaid-container"><pre class="mermaid">
+sequenceDiagram
+    participant IS as invite_sales<br/>complete_session()
+    participant CT as Cloud Tasks
+    participant CRM as CRM Internal API<br/>/v1/internal/crm/<br/>on-hearing-complete
+    participant FS as Firestore
+
+    IS->>IS: lock 内でセッション完了処理
+    IS->>IS: lock 解放
+    IS->>CT: enqueue(on-hearing-complete)
+    CT->>CRM: POST /v1/internal/crm/on-hearing-complete<br/>内部トークン認証
+    CRM->>CRM: Idempotency key チェック<br/>crm_hearing:{tenant_id}:{lead_id}:{session_id}
+    alt 未処理
+        CRM->>FS: Firestore Transaction<br/>- フェーズ遷移 (hearing_active → hearing_done)<br/>- hearing_profile 転記<br/>- timeline イベント作成<br/>- 通知タスク作成
+        FS-->>CRM: 成功
+        CRM-->>CT: 200 OK
+    else 処理済み (replay)
+        CRM-->>CT: 200 OK (冪等)
+    end
+    CT-->>IS: (非同期完了)
+      </pre></div>
+
+      <h4 id="event-hook-detail">設計詳細</h4>
+
+      <table>
+        <thead>
+          <tr><th>項目</th><th>仕様</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>エンドポイント</b></td><td><code>/v1/internal/crm/on-hearing-complete</code>（内部トークン認証）</td></tr>
+          <tr><td><b>リトライ</b></td><td>exponential backoff 5回（Cloud Tasks設定）</td></tr>
+          <tr><td><b>Dead Letter Queue</b></td><td>5回失敗後、管理者に通知</td></tr>
+          <tr><td><b>Idempotency key</b></td><td><code>crm_hearing:{tenant_id}:{lead_id}:{session_id}</code></td></tr>
+          <tr><td><b>フェーズ遷移条件</b></td><td>現在の phase が <code>hearing_active</code> の場合のみ遷移（楽観的ロック）</td></tr>
+        </tbody>
+      </table>
+
+      <h4 id="hearing-event-model">HearingCompletionEvent モデル（Phase 0 で定義）</h4>
+
+      <pre><code class="language-python"># src/server/crm/models.py — Go Condition #2 (F3-2 API スキーマ v1)
+class HearingCompletionEvent(BaseModel):
+    """complete_session() → CRM 通知のペイロード契約"""
+    tenant_id: str
+    lead_id: str
+    session_id: str
+    customer_id: str | None = None
+    hearing_profile: dict
+    needs_tags: NeedsTags | None = None
+    completion_rate: float  # 0.0-1.0
+    completed_at: datetime</code></pre>
+
+      <p>これにより以下の自動処理が<b>非同期かつ冪等に</b>実行される:</p>
 
       <ul>
         <li>顧客フェーズの自動遷移（<code>hearing_active</code> → <code>hearing_done</code>）</li>
@@ -136,9 +239,15 @@ graph TB
         <li>タイムラインへのイベント記録</li>
       </ul>
 
-      <h3 id="auth-kyoyu">認証共有</h3>
+      <h3 id="auth-kyoyu">認証共有（セッション埋め込み方式）</h3>
 
-      <p>認証は既存の <code>tenant_session_cookie</code> を共有するが、CRM APIの操作者解決は <code>X-Tenant-Employee-Id</code> ヘッダーを必須とする。Phase 0 で <code>resolve_tenant_actor()</code> 公開ヘルパーを追加し、既存の <code>_require_tenant_session()</code> と <code>_require_operator_employee()</code> をラップしてCRM側から再利用する。詳細は<a href="crm-ninshou-kengen.html">認証・権限詳細</a>を参照。</p>
+      <div class="notice notice-critical" style="border-left:4px solid #d32f2f; background:#fff3f3; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 C3 対応</b>: 従来の <code>X-Tenant-Employee-Id</code> ヘッダーは平文文字列であり、同一テナント内の別従業員IDを自由にセットできるため、なりすましリスクがあった。<b>セッション埋め込み方式</b>に変更する。
+      </div>
+
+      <p>認証は既存の <code>tenant_session_cookie</code> を共有する。<b><code>X-Tenant-Employee-Id</code> ヘッダーは廃止</b>し、ログイン時に <code>employee_id</code> + <code>employee_role</code> をセッショントークンに含める方式に変更する。サーバー側はセッションから employee_id を取得し、ヘッダー偽装の余地を排除する。</p>
+
+      <p>CRM では「<b>1ログイン = 1従業員</b>」モデルを採用する（CRM v3.2 の F8-4 per-employee 認証に合致）。Phase 0 で <code>resolve_tenant_actor()</code> を公開ヘルパーとして実装し、既存の <code>_require_tenant_session()</code> と <code>_require_operator_employee()</code> をラップしてCRM側から再利用する。詳細は<a href="crm-ninshou-kengen.html">認証・権限詳細</a>を参照。</p>
 
       <h2 id="ninshou-kengen">認証・権限設計</h2>
 
@@ -176,36 +285,38 @@ graph TB
 
       <h3 id="crm-actor">CrmActorの解決フロー</h3>
 
-      <p>CRM APIは<b>Cookie単独では操作者を確定しない</b>。<code>tenant_session_cookie</code>（ログイン境界: company/store）と <code>X-Tenant-Employee-Id</code>（操作者識別）を組み合わせて <code>CrmActor</code> オブジェクトを構築する。</p>
+      <p>CRM APIは <code>tenant_session_cookie</code> に埋め込まれた <code>employee_id</code> と <code>employee_role</code> を使って <code>CrmActor</code> オブジェクトを構築する。<b>ヘッダーによる操作者指定は廃止</b>され、セッショントークンが唯一の操作者識別手段となる。</p>
 
       <div class="mermaid-container"><pre class="mermaid">
 sequenceDiagram
     participant Client as CRM Frontend
     participant API as crm_api.py
     participant Resolver as resolve_tenant_actor()
-    participant InviteSales as invite_sales.repository
+    participant Session as セッションストア
     participant Firestore as Firestore
 
-    Client->>API: GET /tenant/crm/customers<br/>Cookie: tenant_session<br/>X-Tenant-Employee-Id: emp_xxx
+    Client->>API: GET /tenant/crm/customers<br/>Cookie: tenant_session<br/>(employee_id 埋め込み済み)
 
-    API->>Resolver: resolve_tenant_actor(request, emp_xxx)
-    Resolver->>InviteSales: _require_tenant_session(cookie)
-    InviteSales->>Firestore: セッション検証
-    Firestore-->>InviteSales: tenant_id, store_id, login_role
-    InviteSales-->>Resolver: セッション情報
+    API->>Resolver: resolve_tenant_actor(request)
+    Resolver->>Session: セッション検証 + employee_id 取得
+    Session-->>Resolver: tenant_id, store_id, login_role,<br/>employee_id, employee_role
 
-    Resolver->>InviteSales: _require_operator_employee(tenant_id, emp_xxx, store_id)
-    InviteSales->>Firestore: 従業員検証
-    Firestore-->>InviteSales: employee record (role: manager)
-    InviteSales-->>Resolver: employee情報
+    Resolver->>Firestore: 従業員の有効性確認
+    Firestore-->>Resolver: employee record (active: true)
 
-    Resolver-->>API: CrmActor(tenant_id, store_id,<br/>login_role, emp_xxx, role=manager)
+    Resolver-->>API: CrmActor(tenant_id, store_id,<br/>login_role, employee_id, role=manager)
 
     API->>API: 権限マトリクスで操作可否を判定
     API-->>Client: 200 OK / 403 Forbidden
       </pre></div>
 
-      <p><b>重要な設計判断</b>: Phase 0 で <code>invite_sales</code> 側に公開ヘルパー（<code>resolve_tenant_actor()</code>）を追加し、privateメソッドの直接呼び出しを避ける。<code>assigned_only</code> スコープの判定は <code>employee_id</code> ベースで行い、Cookie単独では許可しない。</p>
+      <p><b>重要な設計判断</b>:</p>
+      <ul>
+        <li>Phase 0 で <code>invite_sales</code> 側に公開ヘルパー（<code>resolve_tenant_actor()</code>）を追加し、privateメソッドの直接呼び出しを避ける</li>
+        <li><code>X-Tenant-Employee-Id</code> ヘッダーは<b>完全に廃止</b>。セッショントークンから employee_id を取得することで、なりすましリスクを排除する</li>
+        <li><code>assigned_only</code> スコープの判定は <code>employee_id</code> ベースで行い、Cookie単独では許可しない</li>
+        <li>ログイン時にセッションへ <code>employee_id</code> + <code>employee_role</code> を含める実装を Phase 0 の <code>resolve_tenant_actor()</code> に統合する</li>
+      </ul>
 
       <h2 id="gaibu-renkei">外部連携アーキテクチャ</h2>
 
@@ -297,17 +408,42 @@ graph LR
 
       <h3 id="index-sekkei">インデックス設計</h3>
 
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 H1 対応</b>: 当初のインデックスリストに不足があった。crm_communications、crm_inquiries の追加インデックスと、重複検知用の phone/email_search_hash インデックスを追加。Phase 1 では最小 4-5 本が必要。
+      </div>
+
       <p>CRMの主要クエリパターンに対応するため、以下の<b>複合インデックス</b>を設計する:</p>
 
-      <ul>
-        <li><code>crm_customers</code>: <code>(tenant_id, phase, updated_at DESC)</code> — カンバンビューのフェーズ別表示</li>
-        <li><code>crm_customers</code>: <code>(tenant_id, assigned_employee_id, phase)</code> — 担当者別顧客フィルタ</li>
-        <li><code>crm_customers</code>: <code>(tenant_id, store_id, phase)</code> — 店舗別顧客一覧</li>
-        <li><code>crm_tasks</code>: <code>(tenant_id, assigned_employee_id, due_date ASC)</code> — 本日のタスクリスト</li>
-        <li><code>crm_timeline</code>: <code>(customer_id, created_at DESC)</code> — 顧客タイムライン表示</li>
-        <li><code>crm_communications</code>: <code>(customer_id, created_at DESC)</code> — コミュニケーション履歴</li>
-        <li><code>crm_inquiries</code>: <code>(tenant_id, status, created_at DESC)</code> — 反響受信トレイ</li>
-      </ul>
+      <h4>Phase 1 必須インデックス（最小 4-5 本）</h4>
+
+      <table>
+        <thead>
+          <tr><th>コレクション</th><th>フィールド</th><th>用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>crm_customers</code></td><td><code>(tenant_id, phase, updated_at DESC)</code></td><td>カンバンビューのフェーズ別表示</td></tr>
+          <tr><td><code>crm_customers</code></td><td><code>(tenant_id, assigned_employee_id, phase)</code></td><td>担当者別顧客フィルタ</td></tr>
+          <tr><td><code>crm_customers</code></td><td><code>(tenant_id, store_id, phase)</code></td><td>店舗別顧客一覧</td></tr>
+          <tr><td><code>crm_tasks</code></td><td><code>(tenant_id, assigned_employee_id, due_date ASC)</code></td><td>本日のタスクリスト</td></tr>
+          <tr><td><code>crm_timeline</code></td><td><code>(customer_id, created_at DESC)</code></td><td>顧客タイムライン表示</td></tr>
+        </tbody>
+      </table>
+
+      <h4>Phase 1+ 追加インデックス</h4>
+
+      <table>
+        <thead>
+          <tr><th>コレクション</th><th>フィールド</th><th>用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>crm_communications</code></td><td><code>(customer_id, created_at DESC)</code></td><td>コミュニケーション履歴</td></tr>
+          <tr><td><code>crm_communications</code></td><td><code>(tenant_id, channel, created_at DESC)</code></td><td>チャネル別通信履歴</td></tr>
+          <tr><td><code>crm_inquiries</code></td><td><code>(tenant_id, status, created_at DESC)</code></td><td>反響受信トレイ</td></tr>
+          <tr><td><code>crm_inquiries</code></td><td><code>(tenant_id, source, status)</code></td><td>ソース別反響フィルタ</td></tr>
+          <tr><td><code>crm_customers</code></td><td><code>(tenant_id, phone_search_hash)</code></td><td>電話番号での重複検知</td></tr>
+          <tr><td><code>crm_customers</code></td><td><code>(tenant_id, email_search_hash)</code></td><td>メールアドレスでの重複検知</td></tr>
+        </tbody>
+      </table>
 
       <h3 id="data-zentei">前提条件</h3>
 
@@ -327,9 +463,9 @@ graph LR
           <li class="toc-h3"><a href="#backend-structure">バックエンド構造</a></li>
           <li class="toc-h3"><a href="#frontend-structure">フロントエンド構造</a></li>
           <li><a href="#setsuzoku-point">既存コードとの接続ポイント</a></li>
-          <li class="toc-h3"><a href="#readonly-ref">読み取り専用参照</a></li>
-          <li class="toc-h3"><a href="#event-hook">イベントフック</a></li>
-          <li class="toc-h3"><a href="#auth-kyoyu">認証共有</a></li>
+          <li class="toc-h3"><a href="#readonly-ref">読み取り専用参照（公開APIパターン）</a></li>
+          <li class="toc-h3"><a href="#event-hook">イベントフック（Cloud Tasks非同期方式）</a></li>
+          <li class="toc-h3"><a href="#auth-kyoyu">認証共有（セッション埋め込み方式）</a></li>
           <li><a href="#ninshou-kengen">認証・権限設計</a></li>
           <li class="toc-h3"><a href="#role-kakuchou">3ロール拡張</a></li>
           <li class="toc-h3"><a href="#kengen-matrix">権限マトリクス</a></li>

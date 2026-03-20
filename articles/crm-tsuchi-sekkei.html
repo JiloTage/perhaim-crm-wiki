@@ -354,6 +354,8 @@ flowchart TD
         <li><b>VAPID鍵管理</b>: <code>VAPID_PUBLIC_KEY</code> / <code>VAPID_PRIVATE_KEY</code> を Secret Manager に格納</li>
       </ul>
 
+      <div class="notice notice-low" style="border-left:4px solid #388e3c; background:#e8f5e9; padding:12px; margin:12px 0;"><b>レビュー指摘 L4 対応</b>: VAPID（Voluntary Application Server Identification）鍵ペアの管理方針を明確化する。公開鍵はフロントエンドの Service Worker に埋め込み、秘密鍵は GCP Secret Manager で管理する。鍵ローテーションは年1回を推奨する（ユーザーの再購読が必要なため慎重に実施すること）。</div>
+
       <h3 id="push-payload">ペイロード設計</h3>
       <p>Push通知のペイロードは以下の共通構造に従う:</p>
       <table>

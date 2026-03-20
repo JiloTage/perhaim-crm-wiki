@@ -75,6 +75,18 @@
         <li>店舗間移動: manager以上の権限で <code>store_id</code> を変更可能</li>
       </ul>
 
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M8 対応</b>: LINE 1:N 店舗共有パターンのルーティング曖昧性を解消するため、以下の優先順位を明確化する。
+        <p style="margin:8px 0 4px 0;"><b>ルーティング優先順位</b>（上から順に評価）:</p>
+        <ol style="margin:0 0 8px 0;">
+          <li><b>既存マッピング優先</b>: <code>customer_id</code> に既存の担当者マッピングがあれば、その担当者にルーティング</li>
+          <li><b>キーワードルーティング</b>: メッセージ本文に含まれる店舗名・物件名等のキーワードで対象店舗を判定</li>
+          <li><b>デフォルト店舗</b>: テナント設定で指定されたデフォルト店舗に振り分け</li>
+          <li><b>ラウンドロビン</b>: 上記すべてで判定不能な場合の最終手段として、店舗間でラウンドロビン割当</li>
+        </ol>
+        <p style="margin:4px 0;"><b>ルーティング失敗時の対応</b>: いずれの判定ルールにも該当しない場合、またはルーティング処理でエラーが発生した場合は、テナントの manager ロールに通知を送信し、手動割当を促す。</p>
+        <p style="margin:4px 0;"><b>店舗間移動ログ</b>: 顧客の <code>store_id</code> が変更された場合、移動元・移動先の店舗情報と変更理由を <code>crm_timeline</code> に記録し、顧客対応履歴のトレーサビリティを確保する。</p>
+      </div>
+
       <div class="mermaid-container"><pre class="mermaid">
 sequenceDiagram
     participant LINE as LINE Platform
@@ -105,6 +117,14 @@ sequenceDiagram
       <h2 id="gmail-hangyo-torikomi">Gmail反響取込</h2>
 
       <p>SUUMO、HOME'S、at home などの<b>不動産ポータルサイト</b>からの反響メールを専用Gmailアドレスに転送し、<b>Gmail API</b>経由で自動取得・パースする。パースされた情報は <code>crm_inquiries</code> コレクションに格納され、CRMの反響受信トレイに表示される。</p>
+
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M7 対応</b>: Gmail API / Google Calendar API のスコープ最小化。OAuth認可時に要求するスコープは以下の通り最小限に制限する:
+        <ul style="margin:8px 0 0 0;">
+          <li><b>Gmail API</b>: <code>gmail.readonly</code> のみ（反響メール取込はリードオンリー）。送信機能が必要な場合のみ <code>gmail.send</code> を追加で要求する</li>
+          <li><b>Google Calendar API</b>: <code>calendar.events</code> のみ（イベントCRUDに限定）。<code>calendar</code> フルスコープは使用しない</li>
+          <li><b>動的スコープ要求</b>: テナントの利用機能に応じてスコープを動的に要求する（例: カレンダー連携を有効化した時点で初めて <code>calendar.events</code> を要求）</li>
+        </ul>
+      </div>
 
       <h3 id="mail-forward-parse">メール転送パース戦略</h3>
 
@@ -209,6 +229,16 @@ flowchart TD
       <h2 id="csv-import">CSVインポート</h2>
 
       <p>既存顧客データや他システムからのデータ移行のため、<b>CSVファイルによる一括インポート</b>機能を提供する。フロントエンドとバックエンドの連携による<b>10ステップフロー</b>で、安全かつ確実なデータ取り込みを実現する。</p>
+
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M9 対応</b>: CSVインポートの攻撃ベクターに対するセキュリティ対策を追加する。
+        <ul style="margin:8px 0 0 0;">
+          <li><b>Formula injection 防止</b>: セル値が <code>=</code>, <code>+</code>, <code>-</code>, <code>@</code>, <code>\t</code>, <code>\r</code> で始まる場合はプレフィックスにシングルクォートを付与してサニタイズする</li>
+          <li><b>ファイルサイズ上限</b>: アップロード可能なCSVファイルは <b>10MB</b> まで</li>
+          <li><b>行数上限</b>: 1ファイルあたり <b>10,000行</b> まで（ヘッダー行除く）</li>
+          <li><b>Content-Type 検証</b>: アップロード時に <code>text/csv</code> または <code>application/vnd.ms-excel</code> であることをサーバーサイドで検証する</li>
+          <li><b>サーバーサイド再パース</b>: クライアントサイドのプレビュー結果は信頼せず、バックエンドで必ずCSVを再パースしてからバリデーション・インポート処理を行う</li>
+        </ul>
+      </div>
 
       <h3 id="csv-10step-flow">フロントエンド/バックエンドの10ステップフロー</h3>
 
@@ -320,6 +350,32 @@ flowchart TD
     B -->|4xx その他| J["エラーログ記録<br/>処理スキップ"]
       </pre></div>
 
+      <h2 id="perhub-sync-kakuchou">PerHub同期拡張</h2>
+
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;"><b>レビュー指摘 H2 対応</b>: PerHub Sync v2 パターンとの不整合。CRM → PerHub 方向の同期設計が未定義であったため、本セクションを追加。</div>
+
+      <p>CRM外部連携は外部サービス→CRM方向のデータ取込に加え、<b>CRM → PerHub 方向の同期</b>も設計対象とする。<code>crm_customers</code> の変更をPerHubに同期するためのパターンを以下に定義する。</p>
+
+      <h3 id="perhub-sync-design">CRM → PerHub 同期設計</h3>
+
+      <p>CRM側で顧客情報が更新された際、PerHub Sync v2 のパターンに準拠して変更を同期する。同期対象のイベントは以下の通り:</p>
+
+      <ul>
+        <li><b>顧客フェーズ遷移</b>: <code>phase_changed</code> イベントをPerHubに通知</li>
+        <li><b>顧客情報更新</b>: <code>customer_updated</code> イベントで基本情報の変更を同期</li>
+        <li><b>AIヒアリング完了</b>: <code>hearing_completed</code> イベントでニーズタグ等の成果物を同期</li>
+      </ul>
+
+      <h3 id="idempotency-key-tougou">idempotency_key 統合方針</h3>
+
+      <p>CRM → PerHub 同期においても、Webhook設計と同じ<b>idempotency_key</b>パターンを採用する。キー生成ルールは <code>{tenant_id}:{customer_id}:{event_type}:{timestamp_ms}</code> 形式とし、PerHub側での重複処理を防止する。</p>
+
+      <ul>
+        <li><b>同期方式</b>: Firestore onWrite トリガー → Cloud Tasks → PerHub Sync API</li>
+        <li><b>リトライ</b>: 連携基盤の共通リトライ戦略（指数バックオフ、最大3回）を適用</li>
+        <li><b>実装フェーズ</b>: <b>Phase 3+</b> で実装予定。Phase 0〜2 ではCRM単独動作を優先する</li>
+      </ul>
+
     </main>
 
     <aside class="wiki-sidebar">
@@ -346,6 +402,9 @@ flowchart TD
           <li class="toc-h3"><a href="#integrations-directory">integrations/ ディレクトリ構造</a></li>
           <li class="toc-h3"><a href="#error-handling-common">エラーハンドリング共通パターン</a></li>
           <li class="toc-h3"><a href="#retry-strategy">リトライ戦略</a></li>
+          <li><a href="#perhub-sync-kakuchou">PerHub同期拡張</a></li>
+          <li class="toc-h3"><a href="#perhub-sync-design">CRM → PerHub 同期設計</a></li>
+          <li class="toc-h3"><a href="#idempotency-key-tougou">idempotency_key 統合方針</a></li>
         </ul>
       </div>
 

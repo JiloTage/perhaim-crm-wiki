@@ -127,6 +127,32 @@ erDiagram
         </tbody>
       </table>
 
+      <h3 id="crm-settings-subcollection">crm_settings サブコレクション設計</h3>
+
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M4 対応</b>: crm_settings の 1 ドキュメント肥大化リスクに対し、サブコレクション化を推奨する。</div>
+
+      <p><code>crm_settings/{tenant_id}</code> ドキュメントに LINE 連携設定・Gmail 連携設定・カレンダー設定・通知設定などすべてのテナント設定を格納すると、ドキュメントサイズが Firestore の <b>1MB 上限</b>に近づくリスクがある。また、設定カテゴリごとのアクセス制御やキャッシュ管理が困難になる。以下のサブコレクション構造を推奨する:</p>
+
+      <table>
+        <thead>
+          <tr><th>パス</th><th>用途</th><th>主なフィールド</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>crm_settings/{tenant_id}</code>（ルート）</td><td>基本設定のみ</td><td><code>crm_enabled</code>, <code>plan</code>, <code>timezone</code>, <code>wrapped_dek</code></td></tr>
+          <tr><td><code>crm_settings/{tenant_id}/line_config</code></td><td>LINE 連携設定</td><td><code>channel_id</code>, <code>channel_secret</code>, <code>webhook_url</code>, <code>rich_menu_id</code></td></tr>
+          <tr><td><code>crm_settings/{tenant_id}/gmail_config</code></td><td>Gmail 連携設定</td><td><code>service_account</code>, <code>watch_label</code>, <code>parser_rules</code>, <code>forwarding_address</code></td></tr>
+          <tr><td><code>crm_settings/{tenant_id}/calendar_config</code></td><td>カレンダー連携設定</td><td><code>google_calendar_id</code>, <code>sync_enabled</code>, <code>default_event_duration</code></td></tr>
+          <tr><td><code>crm_settings/{tenant_id}/notification_config</code></td><td>通知設定</td><td><code>inquiry_notify_channels</code>, <code>task_reminder_timing</code>, <code>escalation_rules</code></td></tr>
+        </tbody>
+      </table>
+      <p>ルートドキュメント（<code>crm_settings/{tenant_id}</code>）には CRM の有効/無効フラグやプラン情報など<b>基本的な設定のみ</b>を保持し、各チャネル連携やカテゴリ別の設定はサブコレクション内の個別ドキュメントに分離する。これにより:</p>
+      <ul>
+        <li>ドキュメントサイズの肥大化を防止し、Firestore の 1MB 制限に余裕を持たせる</li>
+        <li>設定カテゴリごとの <b>Firestore Security Rules</b> を細粒度で設定可能</li>
+        <li>各設定の独立した更新・キャッシュ管理が可能（LINE 設定変更時に全設定の再読み込みが不要）</li>
+        <li>将来的な設定カテゴリ追加時にルートドキュメントへの影響がない</li>
+      </ul>
+
       <h2 id="customer-model">顧客モデル（Customer）</h2>
       <p><b>Customer</b>モデルはCRMの中核エンティティである。「<b>1人の顧客 = 1レコード</b>」の原則に基づき、従来のlead（招待1回＝1レコード）から概念を転換する。顧客は複数のlead（ヒアリング招待）を持つことができ、<code>lead_ids</code> フィールドで1:Nの関係を管理する。</p>
 
@@ -222,10 +248,16 @@ stateDiagram-v2
       </table>
 
       <h3 id="pii-encryption">PII暗号化設計</h3>
+
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 H6 対応</b>: 検索用ハッシュは SHA-256 単独ではなく <b>HMAC-SHA256 + 専用 secret</b> を使用する。rainbow table による逆引きを防止するため。
+      </div>
+
       <p>個人情報保護のため、顧客の連絡先情報には<b>暗号化＋検索用ハッシュ</b>の二重構造を採用する。詳細な暗号化方式とキー管理については<a href="crm-pii-angou.html">PII暗号化設計</a>を参照。</p>
       <ul>
         <li><b>保存ルール</b>: API入力は平文の <code>phone</code> / <code>email</code> を受け取ってよい</li>
         <li><b>暗号化処理</b>: リポジトリ保存時に <code>phone_encrypted</code> / <code>email_encrypted</code> と <code>phone_search_hash</code> / <code>email_search_hash</code> を同時生成</li>
+        <li><b>検索用ハッシュ</b>: <code>HMAC-SHA256(正規化済みPII, search_hash_secret)</code> で生成。secret は PII 暗号化鍵とは分離管理する</li>
         <li><b>検索</b>: 一覧検索・重複検知はハッシュ列を使用</li>
         <li><b>表示</b>: 画面表示時のみ復号する</li>
       </ul>
@@ -267,6 +299,31 @@ stateDiagram-v2
 
       <h2 id="timeline-model">タイムラインモデル（TimelineEvent）</h2>
       <p><b>TimelineEvent</b>は顧客に紐づく<b>全接点の時系列記録</b>を担う。営業活動の透明性と追跡可能性を確保するために、あらゆる顧客接点がイベントとして記録される。</p>
+
+      <h3 id="timeline-scalability">タイムラインのスケーラビリティ対策</h3>
+
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M2 対応</b>: crm_timeline コレクションの肥大化に対する対策を定義する。長期運用でイベント数が増加しても、パフォーマンスとコストを維持するための戦略。</div>
+
+      <p>タイムラインイベントは顧客接点のたびに蓄積されるため、長期運用では1顧客あたり数百〜数千件に達する可能性がある。以下の対策を組み合わせてスケーラビリティを確保する。</p>
+
+      <h4>ページネーション（Cursor-based）</h4>
+      <p>タイムライン取得APIでは <b>cursor-based pagination</b> を採用する。<code>created_at DESC</code> の複合インデックスを使用し、最新N件を効率的に取得する。</p>
+      <ul>
+        <li><b>デフォルト取得件数</b>: 最新20件</li>
+        <li><b>カーソル</b>: <code>startAfter(last_document)</code> で次ページを取得</li>
+        <li><b>インデックス</b>: <code>tenant_id</code> + <code>customer_id</code> + <code>created_at</code> (DESC)</li>
+        <li><b>APIパラメータ</b>: <code>?cursor=xxx&amp;limit=20</code></li>
+      </ul>
+
+      <h4>アーカイブ戦略</h4>
+      <p><b>6ヶ月以上前</b>のタイムラインイベントは <code>crm_timeline_archive</code> コレクションに移動し、アクティブコレクションのサイズを抑制する。</p>
+      <ul>
+        <li><b>アーカイブ対象</b>: <code>created_at</code> が6ヶ月以上前のイベント</li>
+        <li><b>アーカイブ先</b>: <code>crm_timeline_archive/{event_id}</code> コレクション（同一スキーマ）</li>
+        <li><b>実行方式</b>: <b>Cloud Scheduler</b> による日次バッチ（毎日 03:00 JST）</li>
+        <li><b>処理フロー</b>: 対象イベントを batch write でアーカイブ先にコピー → 元コレクションから削除（トランザクション）</li>
+        <li><b>UIでのアーカイブ参照</b>: 顧客カード画面に「過去の履歴を表示」リンクを設け、アーカイブコレクションから追加読み込み可能にする</li>
+      </ul>
 
       <h3 id="timeline-fields">フィールド定義</h3>
       <table>
@@ -422,8 +479,187 @@ flowchart TD
       <h3 id="needs-extraction">ニーズタグ抽出</h3>
       <p>マイグレーション時、既存の <code>artifact_record.content</code>（AIヒアリング結果）からニーズ構造を抽出し、<code>NeedsTags</code> として構造化する。プロファイルの <code>facts</code> セクションから条件を分類し、dealbreakers / must_haves / nice_to_haves / dont_care の4カテゴリに振り分ける。</p>
 
-      <h3 id="migration-id-strategy">ID変換戦略</h3>
-      <p>顧客IDは既存のlead_idから導出する: <code>customer_id = "cust_" + lead_id.replace("lead_", "")</code>。これにより、マイグレーション後も既存データとの追跡可能性を維持できる。<code>lead_ids</code> 配列に元のlead_idを格納し、1:N関係の基盤を構築する。</p>
+      <h3 id="migration-id-strategy">ID変換戦略と冪等性保証</h3>
+
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 H3 対応</b>: マイグレーションの冪等性を保証するため、ULID ベースの customer_id と <code>crm_migration_map</code> による二重実行防止を導入する。
+      </div>
+
+      <p>顧客IDは <b>ULID</b> を使用する: <code>customer_id = "cust_" + ULID()</code>。lead_id からの導出ではなく、新規にユニークIDを生成する。これにより将来の統合やマージ時のID衝突を防止する。</p>
+
+      <h4>冪等性保証: crm_migration_map</h4>
+
+      <p>マイグレーションの二重実行を防止するため、<code>crm_migration_map</code> コレクションでマッピングを管理する:</p>
+
+      <pre><code class="language-python"># crm_migration_map/{lead_id} ドキュメント
+{
+    "lead_id": "lead_xxx",
+    "customer_id": "cust_01HXXXXXX",  # ULID
+    "migrated_at": "2026-03-20T00:00:00+09:00",
+    "migration_version": 1,
+    "status": "completed"  # "pending" | "completed" | "failed"
+}
+
+# マイグレーション処理（冪等）
+def migrate_lead_to_customer(lead_id: str) -> str:
+    # 1. 既にマイグレーション済みか確認
+    existing = db.collection("crm_migration_map").document(lead_id).get()
+    if existing.exists and existing.to_dict()["status"] == "completed":
+        return existing.to_dict()["customer_id"]  # 冪等: 既存IDを返す
+
+    # 2. 新規 customer_id を ULID で生成
+    customer_id = f"cust_{ulid.new()}"
+
+    # 3. Firestore Transaction で原子的に実行
+    @firestore.transactional
+    def _migrate(transaction):
+        # migration_map を作成
+        transaction.set(
+            db.collection("crm_migration_map").document(lead_id),
+            {"lead_id": lead_id, "customer_id": customer_id, ...}
+        )
+        # customer を作成
+        transaction.set(
+            db.collection("crm_customers").document(customer_id),
+            build_customer_from_lead(lead_id, customer_id)
+        )
+
+    _migrate(db.transaction())
+    return customer_id</code></pre>
+
+      <p><code>lead_ids</code> 配列に元のlead_idを格納し、1:N関係の基盤を構築する。</p>
+
+      <h2 id="parallel-sync">並行運用期間の同期戦略</h2>
+
+      <div class="notice notice-critical" style="border-left:4px solid #d32f2f; background:#fff3f3; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 C5 対応</b>: SalesConsole と CRM の並行運用期間中、lead.status と customer.phase の同期メカニズムを定義する。
+      </div>
+
+      <p>SalesConsole（既存）と CRM（新規）が並行稼働する期間中、<code>lead.status</code> と <code>customer.phase</code> の整合性を維持する必要がある。以下の段階的移行方式を採用する:</p>
+
+      <h3 id="sync-phases">段階移行方式</h3>
+
+      <table>
+        <thead>
+          <tr><th>フェーズ</th><th>同期方式</th><th>Source of Truth</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Phase 1</b></td>
+            <td>CRM は invite_sales を<b>読み取り専用参照</b>。customer が source of truth。lead の変更は CRM に反映しない（CRM 導入前のデータは Phase 0 でマイグレーション済み）。</td>
+            <td><code>crm_customers</code></td>
+          </tr>
+          <tr>
+            <td><b>Phase 3</b></td>
+            <td>SalesConsole のステータス変更を <b>CRM の phase transition API 経由</b>に切替。CRM API が内部的に <code>crm_customers.phase</code> と <code>invite_sales.leads.status</code> の両方を更新する。</td>
+            <td><code>crm_customers</code>（双方向同期）</td>
+          </tr>
+          <tr>
+            <td><b>Phase 7+</b></td>
+            <td>SalesConsole の機能を CRM に統合完了。invite_sales は読み取り専用アーカイブとなる。</td>
+            <td><code>crm_customers</code>（単一）</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="sync-ui">UIでの並行運用表示</h3>
+
+      <p>SalesConsole に「<b>この顧客は CRM で管理されています <a href="#">CRM で見る →</a></b>」バナーを表示し、担当者を CRM 画面に誘導する。CRM が有効化されたテナントでは、SalesConsole 側のステータス変更UIを段階的に非表示にする。</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+sequenceDiagram
+    participant SC as SalesConsole
+    participant CRM as CRM API
+    participant IS as invite_sales
+    participant FS as Firestore
+
+    Note over SC,FS: Phase 3: CRM API 経由の双方向同期
+    SC->>CRM: PATCH /crm/customers/{id}/phase
+    CRM->>FS: crm_customers.phase = "visited"
+    CRM->>IS: invite_sales.leads[lead_id].status = "completed"
+    CRM-->>SC: 200 OK
+
+    Note over SC,FS: Phase 7+: SalesConsole 統合完了
+    SC->>CRM: （SalesConsole は CRM UI に統合）
+      </pre></div>
+
+      <!-- GDPR/個人情報保護法対応 -->
+      <h2 id="gdpr-cascade-delete">GDPR/個人情報保護法対応: カスケード削除設計</h2>
+
+      <div class="notice notice-medium" style="border-left:4px solid #1976d2; background:#e3f2fd; padding:12px; margin:12px 0;"><b>レビュー指摘 M5 対応</b>: 顧客データ削除要求時の関連データのカスケード削除フローを定義する。</div>
+
+      <p>GDPR（EU一般データ保護規則）の「忘れられる権利（Right to Erasure）」および日本の<b>個人情報保護法</b>における本人からの利用停止・消去請求に対応するため、顧客データ削除時の<b>カスケード削除設計</b>を定義する。Customer を起点として、関連する全データを漏れなく削除する仕組みが必要である。</p>
+
+      <h3 id="cascade-target">カスケード削除対象</h3>
+      <p>顧客削除要求を受けた場合、以下の関連データすべてが削除対象となる:</p>
+      <table>
+        <thead>
+          <tr><th>コレクション</th><th>検索条件</th><th>削除対象データ</th><th>削除優先度</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>crm_customers</code></td><td><code>customer_id</code> 一致</td><td>顧客マスタ（PII 暗号化フィールド含む）</td><td>最後（参照整合性維持のため）</td></tr>
+          <tr><td><code>crm_timeline</code></td><td><code>customer_id</code> 一致</td><td>全タイムラインイベント</td><td>高</td></tr>
+          <tr><td><code>crm_tasks</code></td><td><code>customer_id</code> 一致</td><td>全タスク（完了・未完了問わず）</td><td>高</td></tr>
+          <tr><td><code>crm_communications</code></td><td><code>customer_id</code> 一致</td><td>全コミュニケーション記録（LINE・メール・電話）</td><td>高</td></tr>
+          <tr><td><code>crm_inquiries</code></td><td><code>customer_id</code> 一致</td><td>紐付け済み反響レコード</td><td>中（反響自体は匿名化して保持可能）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="cascade-flow">カスケード削除フロー</h3>
+      <p>削除は<b>ソフトデリート（論理削除）</b>を基本とし、保持期間満了後に物理削除を実行する段階的方式を採る:</p>
+
+      <div class="mermaid-container"><pre class="mermaid">
+flowchart TD
+    A[削除要求受付] --> B[権限チェック<br/>admin ロールのみ実行可]
+    B --> C{権限あり?}
+    C -->|No| D[403 Forbidden]
+    C -->|Yes| E[関連データ列挙<br/>timeline / tasks / communications / inquiries]
+    E --> F[削除確認画面<br/>関連データ件数を表示]
+    F --> G{ユーザー確認}
+    G -->|キャンセル| H[処理中断]
+    G -->|確認| I[Firestore バッチ書き込み開始]
+    I --> J[1. crm_timeline: deleted_at 設定]
+    J --> K[2. crm_tasks: deleted_at 設定]
+    K --> L[3. crm_communications: deleted_at 設定]
+    L --> M[4. crm_inquiries: customer_id を null に<br/>匿名化して保持]
+    M --> N[5. crm_customers: deleted_at 設定]
+    N --> O[6. 監査ログ記録<br/>削除者・対象・件数・理由]
+    O --> P[削除完了通知]
+
+    style A fill:#e3f2fd
+    style O fill:#fff8e1
+    style P fill:#e8f5e9
+      </pre></div>
+
+      <h3 id="soft-delete-design">ソフトデリート設計</h3>
+      <p>物理削除ではなく<b>ソフトデリート（<code>deleted_at</code> フィールド）</b>を推奨する理由:</p>
+      <ul>
+        <li><b>誤削除の復旧</b>: 一定期間内であれば管理者が削除を取り消し可能</li>
+        <li><b>法的保持義務との両立</b>: 宅建業法で求められる帳簿保存義務（成約データ10年）と削除要求を両立。法的義務がある場合は削除要求を拒否できるが、その判断期間を確保する</li>
+        <li><b>監査証跡の維持</b>: いつ・誰が・何を削除したかの記録を保持</li>
+      </ul>
+
+      <p>各コレクションのドキュメントに以下のフィールドを追加する:</p>
+      <table>
+        <thead>
+          <tr><th>フィールド</th><th>型</th><th>説明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>deleted_at</code></td><td>string | null</td><td>論理削除日時（ISO 8601）。null = 未削除</td></tr>
+          <tr><td><code>deleted_by</code></td><td>string | null</td><td>削除を実行した従業員ID</td></tr>
+          <tr><td><code>deletion_reason</code></td><td>string | null</td><td>削除理由（<code>"gdpr_request"</code> | <code>"customer_request"</code> | <code>"data_retention_expired"</code>）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="physical-delete-batch">物理削除バッチ</h3>
+      <p>ソフトデリートされたデータは、<b>保持期間満了後</b>にバッチジョブで物理削除を実行する:</p>
+      <ul>
+        <li><b>実行タイミング</b>: 日次バッチ（深夜帯）で <code>deleted_at</code> が保持期間を超過したドキュメントを検索</li>
+        <li><b>保持期間</b>: 削除要求から <b>30日間</b>はソフトデリート状態を維持（誤削除対応猶予期間）</li>
+        <li><b>物理削除処理</b>: Firestore の <code>batch.delete()</code> で関連ドキュメントを一括削除。500件ずつコミットして Firestore のバッチ上限に対応</li>
+        <li><b>監査ログ</b>: 物理削除の実行記録を <code>crm_audit_logs</code> に記録。監査ログ自体は別途5年間保持</li>
+        <li><b>暗号化シュレッディング</b>: 緊急の完全削除が必要な場合は、対象テナントの DEK を破棄することで暗号文を復号不能にする（<a href="crm-pii-angou.html">PII暗号化設計</a>参照）</li>
+      </ul>
 
     </main>
 
@@ -435,6 +671,7 @@ flowchart TD
           <li><a href="#firestore-collection">Firestoreコレクション設計</a></li>
           <li class="toc-h3"><a href="#firestore-prerequisite">前提条件</a></li>
           <li class="toc-h3"><a href="#collection-structure">コレクション構造</a></li>
+          <li class="toc-h3"><a href="#crm-settings-subcollection">crm_settings サブコレクション設計</a></li>
           <li><a href="#customer-model">顧客モデル（Customer）</a></li>
           <li class="toc-h3"><a href="#customer-fields">フィールド定義</a></li>
           <li class="toc-h3"><a href="#phase-management">フェーズ管理（CustomerPhase）</a></li>
@@ -444,6 +681,7 @@ flowchart TD
           <li class="toc-h3"><a href="#task-fields">フィールド定義</a></li>
           <li class="toc-h3"><a href="#task-auto-generation">自動生成ルール</a></li>
           <li><a href="#timeline-model">タイムラインモデル（TimelineEvent）</a></li>
+          <li class="toc-h3"><a href="#timeline-scalability">タイムラインのスケーラビリティ対策</a></li>
           <li class="toc-h3"><a href="#timeline-fields">フィールド定義</a></li>
           <li class="toc-h3"><a href="#event-types">イベントタイプ一覧</a></li>
           <li><a href="#communication-model">コミュニケーションモデル（Communication）</a></li>
@@ -456,7 +694,15 @@ flowchart TD
           <li class="toc-h3"><a href="#migration-premise">前提と制約</a></li>
           <li class="toc-h3"><a href="#phase-mapping">フェーズマッピング</a></li>
           <li class="toc-h3"><a href="#needs-extraction">ニーズタグ抽出</a></li>
-          <li class="toc-h3"><a href="#migration-id-strategy">ID変換戦略</a></li>
+          <li class="toc-h3"><a href="#migration-id-strategy">ID変換戦略と冪等性保証</a></li>
+          <li><a href="#parallel-sync">並行運用期間の同期戦略</a></li>
+          <li class="toc-h3"><a href="#sync-phases">段階移行方式</a></li>
+          <li class="toc-h3"><a href="#sync-ui">UIでの並行運用表示</a></li>
+          <li><a href="#gdpr-cascade-delete">GDPR/個人情報保護法対応: カスケード削除設計</a></li>
+          <li class="toc-h3"><a href="#cascade-target">カスケード削除対象</a></li>
+          <li class="toc-h3"><a href="#cascade-flow">カスケード削除フロー</a></li>
+          <li class="toc-h3"><a href="#soft-delete-design">ソフトデリート設計</a></li>
+          <li class="toc-h3"><a href="#physical-delete-batch">物理削除バッチ</a></li>
         </ul>
       </div>
 

@@ -187,48 +187,109 @@ stateDiagram-v2
         <li><b>lost到達</b>: マネージャーに「失注: {顧客名} — 理由: {lost_reason}」通知</li>
       </ul>
 
+      <h3 id="transaction-design">トランザクション設計</h3>
+
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 H5 対応</b>: フェーズ遷移時の customer update + timeline create + task create を 1 Firestore transaction で実行し、race condition と部分的な更新を防止する。
+      </div>
+
+      <p>フェーズ遷移の全副作用は<b>単一の Firestore Transaction</b>内で原子的に実行される:</p>
+
+      <pre><code class="language-python"># src/server/crm/phase.py
+@firestore.transactional
+def execute_phase_transition(transaction, customer_id: str,
+                              new_phase: CustomerPhase,
+                              actor: CrmActor, reason: str = None):
+    """フェーズ遷移を1トランザクションで原子的に実行"""
+    # 1. Customer ドキュメントを読み取り（楽観的ロック）
+    customer_ref = db.collection("crm_customers").document(customer_id)
+    customer = customer_ref.get(transaction=transaction)
+    current_phase = customer.get("phase")
+
+    # 2. 遷移可否を検証
+    if new_phase not in ALLOWED_TRANSITIONS[current_phase]:
+        raise InvalidTransitionError(f"{current_phase} → {new_phase}")
+
+    # 3. Customer 更新
+    transaction.update(customer_ref, {
+        "phase": new_phase,
+        "phase_changed_at": firestore.SERVER_TIMESTAMP,
+        "updated_at": firestore.SERVER_TIMESTAMP,
+    })
+
+    # 4. Timeline イベント作成
+    timeline_ref = db.collection("crm_timeline").document()
+    transaction.set(timeline_ref, {
+        "event_type": "phase_changed",
+        "customer_id": customer_id,
+        "detail": {"from_phase": current_phase, "to_phase": new_phase},
+        "actor_employee_id": actor.employee_id,
+        # ...
+    })
+
+    # 5. 自動タスク生成
+    task_template = AUTO_TASK_RULES.get(new_phase)
+    if task_template:
+        task_ref = db.collection("crm_tasks").document()
+        transaction.set(task_ref, {
+            "customer_id": customer_id,
+            "auto_generated": True,
+            **task_template,
+        })</code></pre>
+
       <h3 id="auto-action-flow">自動アクションフロー図</h3>
       <div class="mermaid-container"><pre class="mermaid">
 flowchart TD
     A[フェーズ遷移発生] --> B{遷移元の検証}
-    B -->|許可された遷移| C[Customerドキュメント更新]
+    B -->|許可された遷移| TX["🔒 Firestore Transaction 開始"]
     B -->|不正な遷移| X[❌ エラー返却]
+    TX --> C[Customerドキュメント更新]
     C --> D[phase_changed_at 更新]
     D --> E[タイムラインイベント記録]
     E --> F{遷移先フェーズ判定}
     F --> G[自動タスク生成]
     F -->|lost| H[失注理由記録]
-    G --> I{通知対象判定}
-    H --> I
-    I -->|通知あり| J[担当者/マネージャー通知]
+    G --> COMMIT["✅ Transaction Commit"]
+    H --> COMMIT
+    COMMIT --> I{通知対象判定}
+    I -->|通知あり| J[担当者/マネージャー通知<br/>（Transaction外で非同期）]
     I -->|通知なし| K[完了]
     J --> K
 
     style X fill:#ffcccc
     style K fill:#ccffcc
+    style TX fill:#e3f2fd
+    style COMMIT fill:#e8f5e9
       </pre></div>
 
       <!-- セクション4: カンバンビューとの対応 -->
       <h2 id="kanban-view-mapping">カンバンビューとの対応</h2>
       <p><a href="crm-frontend-sekkei.html">フロントエンド設計</a>で定義されたカンバンビュー（<code>/crm/kanban</code>）は、CustomerPhaseの各値をカラムとして表示する。カンバンUIコンポーネントは <code>KanbanBoard.tsx</code> および <code>KanbanColumn.tsx</code> で実装される。</p>
 
-      <h3 id="column-phase-mapping">カラムとフェーズの対応</h3>
-      <p>カンバンボードには<b>lostとcontractedを除く8つのアクティブフェーズ</b>がカラムとして表示される。成約・失注は別セクション（完了済み一覧）で確認する。</p>
+      <h3 id="column-phase-mapping">カラムとフェーズの対応（4-5カラムグルーピング）</h3>
+
+      <div class="notice notice-high" style="border-left:4px solid #f57c00; background:#fff8e1; padding:12px; margin:12px 0;">
+        <b>レビュー指摘 H9 対応</b>: 10フェーズをそのまま10カラムで表示するとUX的に多すぎる。表示上は <b>4-5カラム</b>に畳み、内部モデルは10フェーズを維持する。各カラム内でサブフェーズのバッジを表示して区別する。
+      </div>
+
+      <p>カンバンボードの<b>表示カラム</b>は以下の4-5グループに畳む。内部データモデルの10段階CustomerPhaseは変更しない。</p>
+
       <table>
         <thead>
-          <tr><th>表示順</th><th>カラム名</th><th>対応フェーズ</th><th>カラム背景色</th></tr>
+          <tr><th>表示順</th><th>カラム名</th><th>含まれるフェーズ</th><th>カラム背景色</th></tr>
         </thead>
         <tbody>
-          <tr><td>1</td><td>反響</td><td><code>inquiry</code></td><td>薄い赤</td></tr>
-          <tr><td>2</td><td>ヒアリング待ち</td><td><code>hearing_pending</code></td><td>薄いオレンジ</td></tr>
-          <tr><td>3</td><td>ヒアリング中</td><td><code>hearing_active</code></td><td>薄い黄</td></tr>
-          <tr><td>4</td><td>ヒアリング済み</td><td><code>hearing_done</code></td><td>薄い黄緑</td></tr>
-          <tr><td>5</td><td>来店予約</td><td><code>visit_reserved</code></td><td>薄い緑</td></tr>
-          <tr><td>6</td><td>来店済み</td><td><code>visited</code></td><td>薄い青緑</td></tr>
-          <tr><td>7</td><td>内見</td><td><code>viewing</code></td><td>薄い青</td></tr>
-          <tr><td>8</td><td>申込</td><td><code>application</code></td><td>薄い紫</td></tr>
+          <tr><td>1</td><td><b>反響・問合せ</b></td><td><code>inquiry</code></td><td>薄い赤</td></tr>
+          <tr><td>2</td><td><b>ヒアリング</b></td><td><code>hearing_pending</code>, <code>hearing_active</code>, <code>hearing_done</code></td><td>薄いオレンジ</td></tr>
+          <tr><td>3</td><td><b>来店</b></td><td><code>visit_reserved</code>, <code>visited</code></td><td>薄い緑</td></tr>
+          <tr><td>4</td><td><b>検討・申込</b></td><td><code>viewing</code>, <code>application</code></td><td>薄い青</td></tr>
+          <tr><td>5</td><td><b>成約・失注</b></td><td><code>contracted</code>, <code>lost</code></td><td>薄い紫</td></tr>
         </tbody>
       </table>
+
+      <p><b>UIでの区別</b>: 各カラム内のカードには<b>サブフェーズバッジ</b>（例: 「待ち」「進行中」「完了」）を表示し、10段階の詳細フェーズを視覚的に区別する。カード内のD&D操作では、同一カラム内のサブフェーズ間遷移も可能。</p>
+
+      <p><b>8カラム表示オプション</b>: 詳細表示が必要なユーザー向けに、設定画面で<b>8カラム表示（lost/contracted除く）</b>に切り替えるオプションも提供する。デフォルトは4-5カラムのグルーピング表示。</p>
 
       <h3 id="column-sort">カラム内ソート基準</h3>
       <p>各カラム内のカード（顧客）は以下の優先順でソートされる:</p>
